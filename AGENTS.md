@@ -76,11 +76,14 @@ Ask, then write `~/Library/Application Support/Margin/settings.json` (create the
 
 **Which AI**: they run `margin setup-ai` in their own Terminal. It lists the AIs installed on the Mac (Claude Code,
 Codex, Gemini CLI, a local Ollama), asks which one and which model, and for an API service (Grok, OpenAI,
-OpenRouter, Groq, Mistral, LM Studio) the address and the key, typed hidden into the Keychain. Then it asks one
-made-up test question. Without a terminal (you): `margin setup-ai --provider codex --no-test` (also `--model`,
-`--base-url`); an API key still needs their hidden prompt. Tell them where each AI sends what it's handed
-([README](README.md#works-with-any-ai)): Ollama and LM Studio keep it on the Mac. Each CLI must be signed in with
-its own login (`claude`, `codex`, `gemini`), since the nightly job doesn't see keys exported in a shell profile.
+OpenRouter, Groq, Mistral, LM Studio) the address (https, or this Mac) and then the key, typed hidden into the
+Keychain. Then it asks one made-up test question and checks with a made-up file that a CLI can't read files; if a
+check fails nothing is saved. Without a terminal (you): `margin setup-ai --provider codex` (also `--model`,
+`--base-url`; `--no-test` skips both checks, so don't use it to set up an AI for real); an API key still needs
+their hidden prompt. Tell them where each AI sends what it's handed ([README](README.md#works-with-any-ai)): only
+Ollama with a model it runs itself keeps it on the Mac; a local server like LM Studio may pass it on. Each CLI must
+be signed in with its own login (`claude`, `codex`, `gemini`), since the nightly job doesn't see keys exported in a
+shell profile. After a CLI updates, they run `margin setup-ai` again so the file check runs on the new version.
 
 Others (rarely needed): `backfill_days` (365), `ai_model` ("sonnet": Claude's model when `ai.model` is null),
 `claude_path`, `ai.path` (where another AI's CLI is), `ai.num_ctx` (Ollama's context size), `fx_rates`

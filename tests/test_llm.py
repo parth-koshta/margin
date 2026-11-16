@@ -38,10 +38,15 @@ for k in ("GEMINI_SYSTEM_MD", "GEMINI_CLI_SYSTEM_SETTINGS_PATH"):
 args = sys.argv[1:]
 if "--output-schema" in args:
     files["schema"] = open(args[args.index("--output-schema") + 1]).read()
-runs.append({"argv": sys.argv, "stdin": sys.stdin.read(), "cwd": os.getcwd(), "env": env, "files": files})
+runs.append({"argv": sys.argv, "stdin": sys.stdin.read(), "cwd": os.getcwd(), "cwd_files": sorted(os.listdir(".")),
+             "env": env, "files": files})
 json.dump(runs, open(rec, "w"))
 answers = json.loads(os.environ["FAKE_ANSWERS"])
 a = answers[min(len(runs), len(answers)) - 1]
+if a.get("read_canary"):                     # an AI whose tools still work: it reads the file it was asked for
+    got = open("canary.txt").read().strip() if os.path.exists("canary.txt") else ""
+    a = {"file": json.dumps({"contents": got, "reason": "read it"}),
+         "stdout": json.dumps({"response": json.dumps({"contents": got, "reason": "read it"})})}
 if "--output-last-message" in args and "file" in a:
     open(args[args.index("--output-last-message") + 1], "w").write(a["file"])
 sys.stdout.write(a.get("stdout", ""))
@@ -88,8 +93,11 @@ class ClaudeProvider(FakeCLI):
             "--settings", json.dumps({"disableAllHooks": True}), "--model", "sonnet",
             "--output-format", "json", "--json-schema", json.dumps(SENDERS), "--system-prompt", SYSTEM])
         self.assertEqual(run["stdin"], json.dumps(PAYLOAD, ensure_ascii=False))
-        self.assertEqual(Path(run["cwd"]).resolve(), (paths.DATA_DIR / "ai").resolve())
         self.assertEqual(run["env"]["PATH"], f"{self.dir}:/usr/bin:/bin:/usr/sbin:/sbin")
+        # it starts in an empty folder outside the data folder, with nothing next to it to find
+        cwd, data = Path(run["cwd"]).resolve(), paths.DATA_DIR.resolve()
+        self.assertNotIn(data, (cwd, *cwd.parents))
+        self.assertEqual(run["cwd_files"], [])
 
     def test_the_review_uses_its_own_system_and_schema_and_ai_model(self):
         out = {"structured_output": {"headline": "Quiet week", "summary": ["Spent less"], "flags": []}}
@@ -222,7 +230,9 @@ class GeminiProvider(FakeCLI):
         system_md = run["files"]["GEMINI_SYSTEM_MD"]
         self.assertTrue(system_md.startswith(SYSTEM))
         self.assertIn(json.dumps(SENDERS), system_md)
-        self.assertEqual(list((paths.DATA_DIR / "ai").glob("tmp*")), [])   # its files are gone afterwards
+        self.assertFalse(Path(run["env"]["GEMINI_SYSTEM_MD"]).exists())     # its files are gone afterwards
+        self.assertEqual(run["cwd_files"], [])                               # and weren't in its start folder
+        self.assertNotIn(paths.DATA_DIR.resolve(), Path(run["env"]["GEMINI_SYSTEM_MD"]).resolve().parents)
 
     def test_error(self):
         with self.answers({"stdout": json.dumps({"error": {"message": "Quota exceeded"}}), "exit": 1}):
@@ -241,8 +251,8 @@ class GeminiProvider(FakeCLI):
 class _Server:
     """A fake OpenAI-compatible / Ollama server on 127.0.0.1 that records requests and plays back responses."""
 
-    def __init__(self, *responses):
-        self.requests, self.responses = [], list(responses)
+    def __init__(self, *responses, routes=None):
+        self.requests, self.responses, self.routes = [], list(responses), routes or {}
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -250,7 +260,8 @@ class _Server:
                 pass
 
             def _reply(self):
-                code, body, headers = outer.responses.pop(0) if len(outer.responses) > 1 else outer.responses[0]
+                q = outer.routes.get(self.path, outer.responses)
+                code, body, headers = q.pop(0) if len(q) > 1 else q[0]
                 data = json.dumps(body).encode() if not isinstance(body, bytes) else body
                 self.send_response(code)
                 for k, v in {"Content-Type": "application/json", **headers}.items():
@@ -302,8 +313,8 @@ class OpenAICompatible(unittest.TestCase):
         self.assertEqual(fmt["type"], "json_schema")
         self.assertTrue(fmt["json_schema"]["strict"])
         self.assertEqual(fmt["json_schema"]["schema"], llm.strict_schema(SENDERS))
-        self.assertTrue(llm.is_local(s))
-        self.assertEqual(llm.where(s), "this Mac")
+        self.assertFalse(llm.is_local(s))                  # a server on this Mac may pass it on: never "on this Mac"
+        self.assertEqual(llm.where(s), "a server on this Mac, which may pass it on elsewhere (Margin can't tell)")
 
     def test_falls_back_when_a_service_takes_no_schema(self):
         refuse = (400, {"error": {"message": "response_format json_schema is not supported for this model"}}, {})
@@ -317,8 +328,9 @@ class OpenAICompatible(unittest.TestCase):
         self.assertEqual([r["body"].get("response_format", {}).get("type") for r in srv.requests],
                          ["json_schema", "json_object"])
 
-    def test_other_http_errors_are_errors(self):
-        srv = _Server((401, {"error": {"message": "Incorrect API key provided"}}, {}))
+    def test_other_http_errors_are_errors_without_what_the_service_sent(self):
+        srv = _Server((401, {"error": {"message": "Incorrect API key provided: xai-FAKE…0000. Your input: DEMO STORE"}},
+                       {}))
         try:
             s = {"ai": {"provider": "openai-compatible", "base_url": srv.url + "/v1", "model": "m"}}
             with mock.patch.object(llm, "api_key", return_value=None):
@@ -326,7 +338,7 @@ class OpenAICompatible(unittest.TestCase):
                     llm.ask(SYSTEM, PAYLOAD, SENDERS, s)
         finally:
             srv.close()
-        self.assertIn("HTTP 401 Incorrect API key provided", str(e.exception))
+        self.assertEqual(str(e.exception), "your local model: HTTP 401, the API key was refused.")
         self.assertEqual(len(srv.requests), 1)
 
     def test_redirects_are_never_followed(self):
@@ -377,20 +389,26 @@ class OpenAICompatible(unittest.TestCase):
 
 
 class Ollama(unittest.TestCase):
+    def setUp(self):
+        llm._OLLAMA_SEEN.clear()
+
     def test_request_and_answer(self):
-        srv = _Server((200, {"message": {"role": "assistant", "content": json.dumps(GOOD)}, "done": True}, {}))
+        srv = _Server(routes={"/api/show": [(200, {"model_info": {}, "details": {"family": "llama"}}, {})],
+                              "/api/chat": [(200, {"message": {"role": "assistant", "content": json.dumps(GOOD)},
+                                                   "done": True}, {})]})
         try:
             s = {"ai": {"provider": "ollama", "model": "llama3.1:8b", "base_url": srv.url}}
             self.assertEqual(llm.ask(SYSTEM, PAYLOAD, SENDERS, s), GOOD)
+            self.assertEqual((llm.name(s), llm.where(s), llm.is_local(s)), ("Ollama", "this Mac", True))
         finally:
             srv.close()
-        req, = srv.requests
+        show, req = srv.requests[:2]
+        self.assertEqual((show["path"], show["body"]["model"]), ("/api/show", "llama3.1:8b"))   # asked first
         self.assertEqual(req["path"], "/api/chat")
         body = req["body"]
         self.assertEqual((body["model"], body["stream"], body["format"]), ("llama3.1:8b", False, SENDERS))
         self.assertGreaterEqual(body["options"]["num_ctx"], 8192)       # room for the whole batch
         self.assertEqual(body["messages"][1]["content"], json.dumps(PAYLOAD, ensure_ascii=False))
-        self.assertEqual((llm.name(s), llm.where(s), llm.is_local(s)), ("Ollama", "this Mac", True))
 
     def test_only_on_this_mac(self):
         self.assertIn("pick a local one", llm.missing({"ai": {"provider": "ollama", "model": "gpt-oss:120b-cloud"}}))
@@ -567,6 +585,157 @@ class ReadByNotes(unittest.TestCase):
         self.assertTrue(rows[0].startswith("[read by Claude] [USD 10 ≈ ₹840.00 at ₹84/USD, ECB rate for 2026-11-02"))
         self.assertTrue(rows[1].startswith("[read by AI] [USD 10 ≈ ₹840.00 at ₹84/USD, ECB rate for 2026-11-02"))
         self.assertTrue(all(r.endswith(" Card XX9876 at DEMO STORE.") for r in rows))
+
+
+class SecurityFixes(FakeCLI):
+    """The security review's points, each on made-up data."""
+    prog = "codex"
+
+    def setUp(self):
+        super().setUp()
+        llm._OLLAMA_SEEN.clear()
+        if paths.SETTINGS_PATH.exists():
+            paths.SETTINGS_PATH.unlink()
+
+    def codex(self, model="gpt-demo"):
+        return {"ai": {"provider": "codex", "model": model, "path": str(self.exe)}}
+
+    def test_only_three_names_are_this_mac(self):
+        for url in ("http://localhost:1234/v1", "http://127.0.0.1:1234/v1", "http://[::1]:1234/v1"):
+            self.assertTrue(llm._local(url), url)
+        for url in ("http://demo.localhost:1234/v1", "http://localhost.example.com/v1", "http://10.0.0.5:1234/v1"):
+            self.assertFalse(llm._local(url), url)
+            self.assertIn("isn't an https address",
+                          llm.missing({"ai": {"provider": "openai-compatible", "base_url": url, "model": "m"}}))
+
+    def test_an_ollama_model_that_ollama_says_is_remote_is_refused_before_anything_is_sent(self):
+        srv = _Server(routes={"/api/show": [(200, {"remote_host": "https://ollama.com:443", "remote_model": "big"}, {})],
+                              "/api/chat": [(200, {"message": {"content": json.dumps(GOOD)}}, {})]})
+        try:
+            s = {"ai": {"provider": "ollama", "model": "my-copy", "base_url": srv.url}}      # an `ollama cp` of one
+            self.assertEqual(llm.missing(s), "")                                       # its name looks local
+            self.assertIn("not this Mac", llm.missing(s, keys=True))
+            self.assertFalse(llm.is_local(s))
+            self.assertIn("not this Mac", llm.where(s))
+            with self.assertRaises(llm.AIError):
+                llm.ask(SYSTEM, PAYLOAD, SENDERS, s)
+        finally:
+            srv.close()
+        self.assertNotIn("/api/chat", [r["path"] for r in srv.requests])
+
+    def test_ollama_missing_down_and_a_remote_answer(self):
+        srv = _Server(routes={"/api/show": [(404, {"error": "model 'nope' not found"}, {})]})
+        try:
+            self.assertIn("isn't in this Mac's Ollama",
+                          llm.missing({"ai": {"provider": "ollama", "model": "nope", "base_url": srv.url}}, keys=True))
+        finally:
+            srv.close()
+        self.assertIn("isn't answering",
+                      llm.missing({"ai": {"provider": "ollama", "model": "m", "base_url": "http://127.0.0.1:9"}}, True))
+        srv = _Server(routes={"/api/show": [(200, {"details": {}}, {})],
+                              "/api/chat": [(200, {"remote_host": "https://ollama.com:443",
+                                                   "message": {"content": json.dumps(GOOD)}}, {})]})
+        try:
+            with self.assertRaises(llm.AIError) as e:
+                llm.ask(SYSTEM, PAYLOAD, SENDERS, {"ai": {"provider": "ollama", "model": "m", "base_url": srv.url}})
+        finally:
+            srv.close()
+        self.assertIn("another computer", str(e.exception))
+        self.assertNotIsInstance(e.exception, llm.BadAnswer)
+
+    def test_no_answer_is_an_error_to_retry_not_unsure(self):
+        bad = {"file": "Sure! Here is my answer"}
+        with self.answers(bad, {"stdout": ""}):                 # second run: exits 0 but writes no answer
+            ai.NOTES.clear()
+            decisions, err = ai._ask({"items": [{"id": "0"}]}, ai.BASE, ai.SENDERS_SCHEMA, self.codex())
+        self.assertEqual((decisions, err), ([], "Codex gave no answer."))
+        self.assertEqual(ai.NOTES, [])
+        with self.answers({"stdout": "", "exit": 0}):
+            with self.assertRaises(llm.AIError) as e:
+                llm.ask(SYSTEM, PAYLOAD, SENDERS, self.codex())
+        self.assertNotIsInstance(e.exception, llm.BadAnswer)
+        with self.answers({"stdout": "", "exit": 2}):
+            decisions, err = ai._ask({"items": [{"id": "0"}]}, ai.BASE, ai.SENDERS_SCHEMA, self.codex())
+        self.assertEqual(decisions, [])
+        self.assertTrue(err.startswith("Codex didn't answer (exit 2)"))
+
+    def test_claude_without_structured_output_is_an_error_as_before(self):
+        with mock.patch.object(llm, "find_cli", return_value=str(self.exe)):
+            with self.answers({"stdout": json.dumps({"subtype": "error_max_turns", "result": None})}):
+                with self.assertRaises(llm.AIError) as e:
+                    llm.ask(SYSTEM, PAYLOAD, SENDERS, {})
+        self.assertEqual(str(e.exception), "Claude Code: error_max_turns")
+        self.assertNotIsInstance(e.exception, llm.BadAnswer)
+
+    def test_a_refusal_is_reported_without_its_words(self):
+        def post(url, body, headers, timeout, who):
+            return {"choices": [{"message": {"refusal": "I won't sort DEMO STORE for Jordan Lee"}}]}
+        s = {"ai": {"provider": "openai-compatible", "base_url": "https://api.x.ai/v1", "model": "m"}}
+        with mock.patch.object(llm, "api_key", return_value="xai-FAKE-KEY-0000"), mock.patch.object(llm, "_post", post):
+            with self.assertRaises(llm.AIError) as e:
+                llm.ask(SYSTEM, PAYLOAD, SENDERS, s)
+        self.assertEqual(str(e.exception), "Grok declined to answer.")
+
+    def test_the_address_is_checked_before_the_key_is_asked_for(self):
+        def no_key(*a, **k):
+            raise AssertionError("asked for a key")
+        with contextlib.redirect_stdout(io.StringIO()) as said, mock.patch("sys.stdin.isatty", return_value=True), \
+                mock.patch("getpass.getpass", no_key), mock.patch("margin.keychain.set_secret", no_key):
+            for url in ("http://api.example.com/v1", "http://demo.localhost:1234/v1", "ftp://api.example.com/v1"):
+                self.assertEqual(llm.setup("openai-compatible", "m", url), 1)
+        self.assertIn("isn't an https address", said.getvalue())
+        self.assertFalse(paths.SETTINGS_PATH.exists() and "openai-compatible" in paths.SETTINGS_PATH.read_text())
+
+    def test_setup_refuses_a_cli_that_can_read_files(self):
+        answered = {"file": json.dumps({"verdict": "shop", "reason": "Order updates"})}
+        with contextlib.redirect_stdout(io.StringIO()) as said, mock.patch("sys.stdin.isatty", return_value=False), \
+                mock.patch.object(llm, "find_cli", return_value=str(self.exe)):
+            with self.answers(answered, {"read_canary": True}):
+                self.assertEqual(llm.setup("codex", "gpt-demo"), 1)
+        self.assertIn("read a file on this Mac", said.getvalue())
+        self.assertNotIn('"codex"', paths.SETTINGS_PATH.read_text())                  # nothing changed
+        canary_run = self.runs()[1]
+        self.assertEqual(canary_run["cwd_files"], ["canary.txt"])                     # it was asked for the file
+        self.assertIn("canary.txt", canary_run["stdin"])
+        self.assertFalse(Path(canary_run["cwd"]).exists())                            # and it's gone again
+
+    def test_setup_saves_a_cli_that_cant(self):
+        answered = {"file": json.dumps({"verdict": "shop", "reason": "Order updates"})}
+        blind = {"file": json.dumps({"contents": "", "reason": "I can't read files"})}
+        with contextlib.redirect_stdout(io.StringIO()) as said, mock.patch("sys.stdin.isatty", return_value=False), \
+                mock.patch.object(llm, "find_cli", return_value=str(self.exe)):
+            with self.answers(answered, blind):
+                self.assertEqual(llm.setup("codex", "gpt-demo"), 0)
+        self.assertIn("couldn't read the made-up file", said.getvalue())
+        self.assertEqual(json.loads(paths.SETTINGS_PATH.read_text())["ai"], {"provider": "codex", "model": "gpt-demo"})
+        self.assertEqual(len(self.runs()), 2)
+
+    def test_setup_changes_nothing_when_the_test_question_fails(self):
+        with contextlib.redirect_stdout(io.StringIO()) as said, mock.patch("sys.stdin.isatty", return_value=False), \
+                mock.patch.object(llm, "find_cli", return_value=str(self.exe)):
+            with self.answers({"stdout": '{"type":"error","message":"Not signed in"}\n', "exit": 1}):
+                self.assertEqual(llm.setup("codex", "gpt-demo"), 1)
+        self.assertIn("Nothing changed", said.getvalue())
+        self.assertNotIn('"codex"', paths.SETTINGS_PATH.read_text())
+
+    def test_claude_is_looked_for_only_where_it_always_was(self):
+        claude = " ".join(llm.cli_places("claude", {}))
+        for new in (".npm-global", ".bun", ".volta", ".nvm"):
+            self.assertNotIn(new, claude)
+        self.assertIn(".npm-global", " ".join(llm.cli_places("codex", {})))
+
+    def test_the_start_folder_is_empty_and_outside_the_data_folder(self):
+        data = paths.DATA_DIR.resolve()
+        with llm.start_folder() as first:
+            self.assertEqual(list(first.iterdir()), [])
+            self.assertNotIn(data, (first.resolve(), *first.resolve().parents))
+            (first / "left-behind.txt").write_text("made up")
+            try:
+                with llm.start_folder() as second:                  # not empty any more: a fresh one instead
+                    self.assertNotEqual(second, first)
+                    self.assertEqual(list(second.iterdir()), [])
+            finally:
+                (first / "left-behind.txt").unlink()
 
 
 if __name__ == "__main__":

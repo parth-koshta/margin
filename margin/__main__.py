@@ -419,7 +419,8 @@ def main() -> int:
     s.add_argument("--provider", choices=["claude", "codex", "gemini", "openai-compatible", "ollama", "none"])
     s.add_argument("--model", help="the model's name (default: the AI's own default; Claude: ai_model)")
     s.add_argument("--base-url", help="an OpenAI-compatible service's address, e.g. https://api.x.ai/v1")
-    s.add_argument("--no-test", action="store_true", help="don't ask it a made-up test question")
+    s.add_argument("--no-test", action="store_true",
+                   help="skip the made-up test question and the file check (for trying things out, not real use)")
     s.set_defaults(fn=cmd_setup_ai)
     s = sub.add_parser("rule", help='categorize: margin rule "swiggy" "Food & dining"')
     s.add_argument("keyword")

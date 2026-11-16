@@ -58,9 +58,10 @@ their share of a bill) and writes the reviews and the investment analysis. Choos
 margin setup-ai
 ```
 
-It lists the AIs installed on your Mac and asks which one and which model; for an API service it asks the address
-and the key (typed into a hidden prompt and kept in your macOS Keychain, never in a file). Then it asks the AI one
-made-up test question. It writes `"ai": {"provider": "codex", "model": null}` (for example) to `settings.json`;
+It lists the AIs installed on your Mac and asks which one and which model; for an API service it checks the address
+is https (or this Mac), then asks for the key (typed into a hidden prompt and kept in your macOS Keychain, never in
+a file). Then it asks the AI one made-up test question and, for the CLIs, hands it a made-up file and checks that it
+can't read it. If either check fails, nothing is saved. It writes `"ai": {"provider": "codex", "model": null}` (for example) to `settings.json`;
 `"ai_sort"` and `"ai_review"` still turn sorting and reviews on and off.
 
 | AI | `provider` | Set up | Where what Margin hands it goes | What it keeps on your Mac |
@@ -69,8 +70,8 @@ made-up test question. It writes `"ai": {"provider": "codex", "model": null}` (f
 | Codex | `codex` | `npm install -g @openai/codex`; run `codex` once to sign in | OpenAI, under your ChatGPT plan or API account | No saved session or history (`--ephemeral`, history off) |
 | Gemini | `gemini` | `npm install -g @google/gemini-cli`; run `gemini` once to sign in | Google, under your Google account's or Gemini API key's terms | A copy of each run in `~/.gemini/tmp/…/chats`: Gemini CLI has no switch for it, and deletes them after 30 days by default |
 | Grok, OpenAI, OpenRouter, Groq, Mistral, or any OpenAI-compatible API | `openai-compatible`, with `base_url` | `margin setup-ai` → API service; type the key | That company (with OpenRouter, also the company running the model you pick) | Nothing (the key is in your Keychain) |
-| LM Studio, or another OpenAI-compatible server on your Mac | `openai-compatible`, with `"base_url": "http://localhost:1234/v1"` | Load a model and start LM Studio's server | **Nowhere: it stays on your Mac** | Whatever that server logs |
-| Ollama | `ollama` | Install [Ollama](https://ollama.com), `ollama pull <model>` | **Nowhere: it stays on your Mac** (only a local Ollama; its `-cloud` models are refused) | Nothing |
+| LM Studio, or another OpenAI-compatible server on your Mac | `openai-compatible`, with `"base_url": "http://localhost:1234/v1"` | Load a model and start LM Studio's server | To that server on your Mac. It stays there only if the server runs the model itself; a proxy (LiteLLM, say) or a cloud model passes it on, and Margin can't tell, so it never calls this "on this Mac" | Whatever that server logs |
+| Ollama | `ollama` | Install [Ollama](https://ollama.com), `ollama pull <model>` | **Nowhere: it stays on your Mac.** Before each request Margin asks Ollama whether the model runs locally, and refuses cloud models | Nothing |
 
 Each one runs with the fewest powers it allows, for Margin's runs only (your own setup isn't changed):
 - **Claude Code**: `claude -p` with no tools, no MCP servers, hooks off and no saved session.
@@ -78,13 +79,18 @@ Each one runs with the fewest powers it allows, for Margin's runs only (your own
   plugins, hooks, image tools and MCP servers off, and no saved session (`--ephemeral`) or history.
 - **Gemini CLI**: `gemini -p` with every built-in tool, extension, MCP server, hook, skill and subagent off, and
   Margin's instructions in place of its coding-agent ones (no `GEMINI.md` is loaded).
-- **API services and Ollama**: one chat request; they get no tools at all.
+- **API services and Ollama**: one chat request; they get no tools at all. An API service's errors are reported by
+  their HTTP status only, never with what it sent back.
 
-The CLIs start in an empty folder of Margin's own. Sign in with the CLI's own login (`claude`, `codex`, `gemini`)
-rather than an API key exported in your shell profile: the nightly sync runs from launchd, which doesn't read your
-profile. `"model"` picks the model (`null` means the CLI's own default; for Claude, `ai_model`, which is
-`"sonnet"`). Smaller models get more wrong: Margin checks every answer against the shape it asked for, asks once
-more if it doesn't fit, and otherwise leaves those items to you.
+The CLIs start in an empty folder outside Margin's data folder. A CLI that ignores a switch (an older or newer
+version may name one differently) would fail the made-up-file check in `margin setup-ai`, so run it again after
+updating a CLI. Margin looks for Claude Code only where it always has (`claude_path`, your `PATH`,
+`/opt/homebrew/bin`, `/usr/local/bin`, `~/.claude/local`, `~/.local/bin`). Sign in with the CLI's own login
+(`claude`, `codex`, `gemini`) rather than an API key exported in your shell profile: the nightly sync runs from
+launchd, which doesn't read your profile. `"model"` picks the model (`null` means the CLI's own default; for
+Claude, `ai_model`, which is `"sonnet"`). Smaller models get more wrong: Margin checks every answer against the
+shape it asked for, asks once more if it doesn't fit, and otherwise leaves those items to you. If the AI doesn't
+answer at all (offline, signed out, out of credit), nothing is decided and it's asked again at the next sync.
 
 ### What the AI sees
 
@@ -98,8 +104,8 @@ Every AI gets exactly the same thing, built by Margin for each request:
   stop-loss levels and statement dates.
 
 It never gets your mailbox, your Messages, your statements, the database or your Keychain, and it can't look for
-them: its tools are off. Where it goes is in the table above: with Ollama or LM Studio nothing leaves your Mac;
-otherwise that company processes it under your plan's terms. Some free plans let the company keep what you send
+them: its tools are off. Where it goes is in the table above: with Ollama and a local model nothing leaves your
+Mac; otherwise that company processes it under your plan's terms. Some free plans let the company keep what you send
 and use it to improve its models, so check your plan's data settings first. Turn the AI off with
 `margin setup-ai` → None (or `"ai_sort": false` and `"ai_review": false`); the automatic checks still run.
 
@@ -138,7 +144,7 @@ and use it to improve its models, so check your plan's data settings first. Turn
   Exchange rates are the ECB's (frankfurter.dev): only currency codes and dates are sent.
 - **The AI** (optional) is the one you choose: Claude, Codex, Gemini, an API service such as Grok, or a model on
   your Mac through Ollama. Each gets the same masked data and nothing else, with its tools off; see
-  [What the AI sees](#what-the-ai-sees). With Ollama or LM Studio nothing leaves your Mac. Turn it off with
+  [What the AI sees](#what-the-ai-sees). With Ollama and a local model nothing leaves your Mac. Turn it off with
   `"ai_sort": false` and `"ai_review": false`; the automatic checks still run.
 - Logs record counts only. Notifications never show amounts or payees.
 
