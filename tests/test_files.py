@@ -249,6 +249,17 @@ class Valuing(unittest.TestCase):
         self.assertEqual(len(imports.broker_positions(c)), 1)
         self.assertEqual(imports.read(c, US), [])               # unchanged files aren't read again
 
+    def test_nothing_indian_no_indian_fetches(self):
+        c = mem()
+        self.assertFalse(invest.holds_indian_market(c))
+        self.assertFalse(invest.uses_indmoney(c, US))
+        self.assertTrue(invest.uses_indmoney(c, IN))
+        self.assertTrue(invest.uses_indmoney(c, dict(US, indmoney=True)))
+        c.execute("INSERT INTO inv_statements VALUES ('cas1', 'cas', '2026-10-31', '', 1, '')")
+        c.execute("INSERT INTO inv_positions(stmt, as_of, kind, key, name, units) VALUES "
+                  "('cas1', '2026-10-31', 'mf', 'INF000D01011', 'Demo Fund', 1)")
+        self.assertTrue(invest.holds_indian_market(c))
+
 
 if __name__ == "__main__":
     unittest.main()

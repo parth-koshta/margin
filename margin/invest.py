@@ -259,22 +259,26 @@ def update(conn: sqlite3.Connection, settings: dict, progress=None) -> list[str]
     guard("EPF texts", _epf, conn)
     guard("fixed deposits", _fd, conn, settings)
     guard("PPF", _ppf, conn, settings)
-    guard("INDmoney orders", usstocks.read_orders, conn, settings)
+    if uses_indmoney(conn, settings):
+        guard("INDmoney orders", usstocks.read_orders, conn, settings)
     conn.commit()
     step("Fetching closing prices")
-    guard("stock prices", prices.india_stocks, conn)
-    guard("fund NAVs", prices.mutual_funds, conn)
+    if holds_indian_market(conn):   # whole-market files (NSE/BSE closes, AMFI NAVs): only with something to value
+        guard("stock prices", prices.india_stocks, conn)
+        guard("fund NAVs", prices.mutual_funds, conn)
     pos, _ = usstocks.positions(conn, settings)
     since = date.today() - timedelta(days=10)
     snap = usstocks.history_start(settings)
     if snap:
         since = min(since, date.fromisoformat(snap) - timedelta(days=10))
     from . import imports   # noqa: PLC0415
-    have = conn.execute("SELECT MIN(day) FROM prices WHERE key='^NSEI'").fetchone()[0]
+    have = conn.execute("SELECT MIN(day) FROM prices WHERE key='^GSPC'").fetchone()[0]
     bench_since = date.today() - timedelta(days=10) if have and have <= str(date.today() - timedelta(days=380)) \
         else date.today() - timedelta(days=400)
+    benchmarks = [k for k in prices.BENCHMARKS if k != "^NSEI" or money.home(settings) == "INR"
+                  or holds_indian_market(conn)]
     notes = guard("US prices", prices.tickers, conn, sorted(set(pos) | set(imports.tickers(conn))), since, True) or []
-    notes += guard("benchmarks", prices.tickers, conn, list(prices.BENCHMARKS), bench_since) or []
+    notes += guard("benchmarks", prices.tickers, conn, benchmarks, bench_since) or []
     problems += [f"Investments, prices: {n}" for n in notes]
     conn.commit()
     rows, _ = holdings(conn, settings, online=True)
@@ -283,13 +287,27 @@ def update(conn: sqlite3.Connection, settings: dict, progress=None) -> list[str]
     conn.commit()
     step("Investment analysis")
     guard("analysis", invreview.run_due, conn, settings, bool(new_cas))
-    if not pdf_ready():
+    if not pdf_ready() and money.home(settings) == "INR":
         problems.append("Investments: run margin setup-pan in Terminal so Margin can open your CDSL statement.")
     last = conn.execute("SELECT as_of, note FROM inv_statements WHERE kind='cas' AND ok=1 ORDER BY as_of DESC LIMIT 1"
                         ).fetchone()
     if last and "check:" in (last["note"] or ""):
         problems.append(f"Investments: the CDSL statement for {last['as_of']} didn't fully add up ({last['note']}).")
     return problems + [f"Stop-loss: {h}" for h in hits]
+
+
+def holds_indian_market(conn: sqlite3.Connection) -> bool:
+    """Indian stocks, ETFs or funds in the latest CDSL statement (what the NSE/BSE and AMFI files value)."""
+    cas = _latest_stmt(conn, "cas")
+    return bool(cas and conn.execute("SELECT 1 FROM inv_positions WHERE stmt=? AND kind IN ('in_stock','mf') LIMIT 1",
+                                     (cas["id"],)).fetchone())
+
+
+def uses_indmoney(conn: sqlite3.Connection, settings: dict) -> bool:
+    """INDmoney's order emails are searched with rupees at home (where it's used), or once orders were found, or
+    with "indmoney": true in settings.json."""
+    return (money.home(settings) == "INR" or bool(settings.get("indmoney"))
+            or bool(conn.execute("SELECT 1 FROM us_orders LIMIT 1").fetchone()))
 
 
 def _ppf(conn: sqlite3.Connection, settings: dict) -> None:
