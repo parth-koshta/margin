@@ -71,10 +71,9 @@ p{margin:0 0 10px;color:var(--muted)}
 b{color:var(--text2);font-weight:600}
 code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--line);padding:2px 6px;border-radius:6px;color:var(--text2)}
 </style></head><body><main>""" + icon.svg().decode().replace("<svg ", '<svg class="logo" aria-hidden="true" ', 1) + """
-<h1>Open Margin from the Margin app once</h1>
-<p>This browser hasn't been let in yet. Open <b>Margin</b> from Spotlight (⌘ Space, type Margin) or run
-<code>margin open</code> in Terminal.</p>
-<p>After that, this address works on its own.</p>
+<h1>Let this browser in once</h1>
+<p>This browser hasn't been let in yet. Run <code>margin open</code> in Terminal once; it opens this page with its key.</p>
+<p>After that, this address works on its own. Or skip the browser and use the <b>Margin</b> app.</p>
 </main></body></html>""").encode()
 
 
@@ -335,6 +334,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"running": _job_running(), "progress": prog, "status": _status(conn)})
             if path == "/api/ping":
                 return self._json({"ok": True})
+            if path == "/api/glance":           # the Margin app's menu bar panel (423 above while locked)
+                from . import glance
+                return self._json(glance.summary(conn, sync.load_settings(), _status(conn), _job_running()))
             return self._send(404, b"not found", "text/plain")
         finally:
             conn.close()

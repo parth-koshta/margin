@@ -141,36 +141,61 @@ def _set_app_icon(app: str) -> None:
     subprocess.run([LSREGISTER, "-f", app], capture_output=True)
 
 
+def _make_script_app() -> bool:
+    """The fallback without the Command Line Tools: a small AppleScript app that opens the page in the browser."""
+    cmd = (f"PYTHONPATH={json.dumps(str(paths.PROJECT_DIR))} {json.dumps(_python())} -m margin open "
+           "> /dev/null 2>&1 &")
+    script = f"do shell script {json.dumps(cmd)}"
+    shutil.rmtree(APP_PATH, ignore_errors=True)          # osacompile would mix into an existing app
+    r = subprocess.run(["osacompile", "-o", APP_PATH, "-e", script], capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"Couldn't make the app: {r.stderr.strip()}")
+        return False
+    try:
+        _set_app_icon(APP_PATH)
+    except (OSError, subprocess.CalledProcessError) as e:
+        print(f"(The app works but kept the plain AppleScript icon: {e})")
+    return True
+
+
 def cmd_app(a) -> int:
-    """A Margin app in ~/Applications (Spotlight, Launchpad, Dock) that opens the page, plus the always-on
-    page service at http://margin.localhost/."""
-    from . import server
+    """The Margin app in ~/Applications (Spotlight, Launchpad, Dock): the page in a window of its own, plus the
+    always-on page service at http://margin.localhost/. Without the Command Line Tools (swiftc) the app is a small
+    AppleScript one that opens the page in the browser instead."""
+    from . import macapp, server
     if a.action == "remove":
+        macapp.stop(APP_PATH)                            # quits it (locking Margin) and drops Open at Login
         subprocess.run(["rm", "-rf", APP_PATH])
         subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{paths.WEB_LABEL}"], capture_output=True)
         paths.WEB_PLIST.unlink(missing_ok=True)
+        macapp.forget()
         print("Margin app and page service removed.")
         return 0
     paths.ensure_data_dir()
     if not _install_web_agent():
         return 1
-    cmd = (f"PYTHONPATH={json.dumps(str(paths.PROJECT_DIR))} {json.dumps(_python())} -m margin open "
-           "> /dev/null 2>&1 &")
-    script = f"do shell script {json.dumps(cmd)}"
     os.makedirs(os.path.dirname(APP_PATH), exist_ok=True)
-    r = subprocess.run(["osacompile", "-o", APP_PATH, "-e", script], capture_output=True, text=True)
-    if r.returncode != 0:
-        print(f"Couldn't make the app: {r.stderr.strip()}")
-        return 1
-    try:
-        _set_app_icon(APP_PATH)
-    except (OSError, subprocess.CalledProcessError) as e:
-        print(f"(The app works but kept the plain AppleScript icon: {e})")
-    print(f"Margin app ready: {APP_PATH}. Open it from Spotlight (⌘ Space, type Margin) or drag it to the Dock.")
-    if server.hostname_ok():
-        print(f"Margin is always at http://{server.HOSTNAME}/")
+    native = False
+    if macapp.can_build():
+        print("Building the Margin app…", flush=True)
+        try:
+            macapp.build(APP_PATH, server.address(), server.KEY_PATH)
+            native = True
+        except RuntimeError as e:
+            print(f"Couldn't build the Mac app ({e}). Making the simple one that opens your browser instead.")
     else:
-        print(f"Margin is always at http://127.0.0.1/. For http://{server.HOSTNAME}/ add it to /etc/hosts once:")
+        print("No Command Line Tools (xcode-select --install), so the Margin app opens your browser for now. "
+              "Run margin app install again once they're installed to get its own window.")
+    if not native and not _make_script_app():
+        return 1
+    print(f"Margin app ready: {APP_PATH}. Open it from Spotlight (⌘ Space, type Margin) or drag it to the Dock.")
+    if native:
+        print("It shows Margin in a window of its own; nothing from it is kept in a browser.")
+    if server.hostname_ok():
+        print(f"In a browser: margin open (once per browser), then bookmark http://{server.HOSTNAME}/")
+    else:
+        print(f"Margin is at http://127.0.0.1/. For http://{server.HOSTNAME}/ add it to /etc/hosts once, then run "
+              "margin app install again:")
         print(f"  printf '127.0.0.1\\t{server.HOSTNAME}\\n::1\\t{server.HOSTNAME}\\n' | sudo tee -a /etc/hosts")
     return 0
 
@@ -409,6 +434,7 @@ def main() -> int:
     s.add_argument("--lock", action="store_true", help="start locked, with Touch ID simulated")
     s.add_argument("--india", action="store_true", help="the Indian person in rupees instead of the US person in dollars")
     s.add_argument("--no-open", action="store_true", help="don't open the browser")
+    s.add_argument("--app", action="store_true", help="open it in the Margin app's window instead of the browser")
     s.set_defaults(fn=cmd_demo)
     a = p.parse_args()
     return a.fn(a)

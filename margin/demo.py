@@ -12,6 +12,7 @@ real data folder, never syncs, never contacts the internet and never runs Claude
 - Sync now plays a pretend sync,
 - Claude's sorting and reviews are answered by a stand-in (demo_claude) from the same data the real Claude gets,
 - with --lock it starts locked and Touch ID is simulated.
+With --app it opens in the Margin app's own window instead of the browser (for screen recordings).
 The data is rebuilt each day so it always ends today, and whenever Margin's code changes; --fresh rebuilds it now.
 """
 from __future__ import annotations
@@ -57,7 +58,8 @@ def main(a) -> int:
         print(f"Building the demo data ({'Kavya in Kochi, rupees' if a.india else 'Jordan in Seattle, dollars'})…",
               flush=True)
         print(build(persona))
-    serve(a.port, open_browser=not a.no_open, locked=a.lock)
+    app = getattr(a, "app", False)
+    serve(a.port, open_browser=not a.no_open and not app, locked=a.lock, app=app)
     return 0
 
 
@@ -691,7 +693,33 @@ class _V6(ThreadingHTTPServer):
     address_family = socket.AF_INET6
 
 
-def serve(port: int = 8765, open_browser: bool = True, locked: bool = False) -> None:
+APP_DIR = DEMO_ROOT / "app"            # the demo's own copy of the Mac app; it can only show the demo
+
+
+def open_app(port: int) -> subprocess.Popen:
+    """The demo in the Margin app's window (for screen recordings) instead of a browser tab. The demo has its own copy
+    of the app, built once (again when macapp.swift changes), whose address is the demo's: it never shows your real
+    Margin. Its key is the demo's, which isn't a secret."""
+    from . import macapp
+    app = APP_DIR / "Margin Demo.app"
+    key_file = APP_DIR / "demo.key"
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    key_file.write_text(KEY)
+    if macapp.stale(app):
+        if not macapp.can_build():
+            raise SystemExit("The app window needs the Command Line Tools (xcode-select --install). "
+                             "Or leave out --app to use the browser.")
+        print("Building the Margin app window for the demo (once)…", flush=True)
+        try:
+            macapp.build(app, f"http://{HOST}:8765/", key_file, macapp.DEMO_BUNDLE_ID, fix="margin demo --app",
+                         demo=True)
+        except RuntimeError as e:
+            raise SystemExit(f"Couldn't build the app window: {e}")
+    return subprocess.Popen([str(macapp.executable(app)), "--port", str(port)],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def serve(port: int = 8765, open_browser: bool = True, locked: bool = False, app: bool = False) -> None:
     global _DELAY
     _guard()
     from . import lock, paths, server
@@ -720,7 +748,20 @@ def serve(port: int = 8765, open_browser: bool = True, locked: bool = False) -> 
           f"Data folder: {paths.DATA_DIR}. Your real Margin isn't touched. Ctrl-C stops it.", flush=True)
     if open_browser:
         subprocess.run(["open", f"{url}?k={KEY}"])
+    window = None
+    if app:
+        window = open_app(port)
+        print("Opened in the Margin app window, with Margin in the menu bar. Quitting the app (⌘Q, or Quit in its "
+              "menu bar panel) stops the demo.", flush=True)
+
+        def stop_with_window():
+            window.wait()
+            httpds[0].shutdown()
+        threading.Thread(target=stop_with_window, daemon=True).start()
     try:
         httpds[0].serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        if window and window.poll() is None:
+            window.terminate()
