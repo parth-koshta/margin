@@ -8,9 +8,9 @@
   funds, US stocks, NPS, EPF, PPF and a fixed deposit.
 Each has 14 months of spending, two years of investment history, spending and investment reviews and Sort out items.
 Everything in it is invented. It lives in ~/Library/Caches/Margin Demo/<us|india> and never reads or writes your
-real data folder, never syncs, never contacts the internet and never runs Claude:
+real data folder, never syncs, never contacts the internet and never asks a real AI:
 - Sync now plays a pretend sync,
-- Claude's sorting and reviews are answered by a stand-in (demo_claude) from the same data the real Claude gets,
+- the AI's sorting and reviews are answered by a stand-in (demo_ai) from the same data a real AI gets,
 - with --lock it starts locked and Touch ID is simulated.
 With --app it opens in the Margin app's own window instead of the browser (for screen recordings).
 The data is rebuilt each day so it always ends today, and whenever Margin's code changes; --fresh rebuilds it now.
@@ -37,7 +37,7 @@ REAL_DIR = Path.home() / "Library" / "Application Support" / "Margin"
 HOST = "demo.margin.localhost"     # *.localhost is always this Mac; its cookie is separate from the real page's
 KEY = "demo"
 MARKER = ".margin-demo"            # only a folder with this file in it is ever deleted and rebuilt
-_DELAY = 0.0                       # the Claude stand-in's thinking time (0 while building)
+_DELAY = 0.0                       # the AI stand-in's thinking time (0 while building)
 
 
 def main(a) -> int:
@@ -216,11 +216,11 @@ def _us_money(conn, settings, rnd, today, now) -> None:
         else:
             alert(when, f"Chase: A deposit of ${amount:,.2f} from {payee} posted to your account ending in 1234.{bal}")
 
-    def abroad(when, gbp, payee):        # alerts in pounds: read by Claude, converted at the day's rate
+    def abroad(when, gbp, payee):        # alerts in pounds: read by the AI, converted at the day's rate
         rate = 1.27
         note = ai.fx_note("GBP", gbp, round(gbp * rate, 2), rate, f"ECB rate for {when:%Y-%m-%d}", "USD").strip()
         book.add(when, round(gbp * rate, 2), "out", payee, CARD,
-                 f"[read by Claude] {note} Chase: You made a £{gbp:,.2f} transaction with {payee} on your card ending "
+                 f"{ai.READ_BY_AI} {note} Chase: You made a £{gbp:,.2f} transaction with {payee} on your card ending "
                  f"in 9876.", sender="Chase <no.reply.alerts@chase.com>", bank="Chase")
 
     start = today - timedelta(days=425)
@@ -347,11 +347,11 @@ def _india_money(conn, settings, rnd, today, now) -> None:
 
     book = _Book(conn, settings, now)
 
-    def in_dollars(when: datetime, usd: float, payee: str) -> None:     # read by Claude, converted at the day's rate
+    def in_dollars(when: datetime, usd: float, payee: str) -> None:     # read by the AI, converted at the day's rate
         rate = 88.9
         note = ai.fx_note("USD", usd, round(usd * rate, 2), rate, f"ECB rate for {when:%Y-%m-%d}", "INR").strip()
         book.add(when, usd * rate, "out", payee, "ICICI card ••9876",
-                 f"[read by Claude] {note} Transaction of USD {usd:.2f} on ICICI Bank Card XX9876 at {payee}.",
+                 f"{ai.READ_BY_AI} {note} Transaction of USD {usd:.2f} on ICICI Bank Card XX9876 at {payee}.",
                  source="sms", sender="VM-ICICIT-S", bank="ICICI")
 
     start = today - timedelta(days=425)
@@ -537,22 +537,21 @@ def _reviews(conn, settings, today, now) -> None:
     ai.RUNNERS["audit"](conn, settings, None)        # older payments were checked long ago; Sort now stays quick
 
 
-# --- the Claude stand-in ---------------------------------------------------------------------------------------
+# --- the AI stand-in -------------------------------------------------------------------------------------------
 GUESSES = [("GENERAL STORE", "Groceries", "high", "A neighbourhood grocery store"),
            ("MEDICAL", "Medical", "high", "A pharmacy"), ("TAILOR", "Shopping", "medium", "A tailor: clothes"),
            ("PIZZA", "Food & dining", "high", "A pizza place"), ("CLEANERS", "Home services", "high", "Dry cleaning"),
            ("CHAI", "Food & dining", "high", "A tea stall")]
 
 
-def demo_claude(payload: dict, kind: str, settings: dict, system: str | None = None, schema: dict | None = None,
-                timeout: int = 300) -> tuple[dict | None, str]:
-    """Answers like review.ask_claude, from the same payload, without running Claude."""
-    from . import ai, invreview
+def demo_ai(system: str, payload: dict, schema: dict, settings: dict, timeout: int = 300) -> dict:
+    """Answers like llm.ask, from the same payload, without asking a real AI."""
+    from . import ai, invreview, review
     time.sleep(_DELAY)
     if schema is invreview.SCHEMA:
-        return _investment_review(payload), ""
-    if schema is None:
-        return _spending_review(payload), ""
+        return _investment_review(payload)
+    if schema is review.SCHEMA:
+        return _spending_review(payload)
     decisions = []
     for it in payload.get("items", []):
         blob = json.dumps(it, ensure_ascii=False).upper()
@@ -572,7 +571,7 @@ def demo_claude(payload: dict, kind: str, settings: dict, system: str | None = N
             decisions.append({"id": it["id"], "verdict": "unsure", "reason": "No amount in the text"})
         elif schema is ai.SPLITS_SCHEMA:
             decisions.append({"id": it["id"], "bill_id": "", "confidence": "low", "reason": "No matching bill"})
-    return {"decisions": decisions}, ""
+    return {"decisions": decisions}
 
 
 def _spending_review(p: dict) -> dict:
@@ -678,9 +677,12 @@ def _sync_status() -> tuple[bool, dict | None]:
 
 
 def _use_stand_ins() -> None:
-    from . import lock, review
-    review.ask_claude = demo_claude
-    review.claude_path = lambda settings: "demo"
+    from . import llm, lock
+    llm.ask = demo_ai
+    llm.missing = lambda settings, keys=False: ""                          # "set up", whatever the settings say
+    llm.ready = lambda settings: True
+    llm.name = lambda settings: "AI"                                       # the demo names no AI company
+    llm.is_local = lambda settings: False
 
     def unlock(settings):
         time.sleep(1.2)                     # about as long as a real fingerprint

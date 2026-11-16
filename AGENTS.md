@@ -11,9 +11,10 @@ how to adapt Margin to another bank or country, and how to work on the code with
    `rules.json`, `statements/`) into chat, files in the repo, issues, commits or anything online. When you need to
    check something, query counts or yes/no answers, not values. If you must look at one record to debug, say so
    first and keep it to that record.
-2. **Secrets go into hidden prompts, never chat.** Statement passwords, PAN and PRAN are typed by the person into
-   `margin setup-pan`, `margin setup-pran` or `margin setup-ppf` in their own Terminal (input is hidden and goes
-   to the Keychain). Never ask them to paste one to you, and never put one on a command line.
+2. **Secrets go into hidden prompts, never chat.** Statement passwords, PAN, PRAN and AI API keys are typed by the
+   person into `margin setup-pan`, `margin setup-pran`, `margin setup-ppf` or `margin setup-ai` in their own
+   Terminal (input is hidden and goes to the Keychain). Never ask them to paste one to you, and never put one on a
+   command line or in `settings.json`.
 3. **Some steps are theirs.** You can't and mustn't do these for them: signing in to Google and approving access,
    granting Full Disk Access in System Settings, turning on Text Message Forwarding on their iPhone, approving
    Touch ID, typing passwords. Tell them exactly what to click, then check the result with `margin doctor`.
@@ -37,7 +38,7 @@ sw_vers -productVersion                 # macOS
 xcode-select -p                         # command line tools; if missing, the person runs: xcode-select --install
 /usr/bin/python3 --version              # 3.9 or newer (comes with the command line tools)
 /usr/bin/swiftc --version               # for the Margin app, the PDF reader and the Touch ID prompt
-command -v claude                       # optional: Claude Code, for sorting and reviews
+command -v claude codex gemini ollama   # optional: any one AI, for sorting and reviews
 ```
 
 Try the demo first so they see what they're setting up: `./margin-cli demo` (US person, dollars) or
@@ -62,8 +63,9 @@ Ask, then write `~/Library/Application Support/Margin/settings.json` (create the
 | `self_names` | Their name as banks print it, for transfers to themselves | `["KAVYA MENON", "MENON KAVYA"]` |
 | `read_sms` | Do their bank texts reach this Mac (iPhone + Text Message Forwarding)? | `true` / `false` |
 | `misc_below` | Small unsorted spends below this go to Miscellaneous. 100 suits rupees; use ~3 for dollars/euros | `100` |
-| `about_me` | Facts that help Claude sort | `["Money from friends is usually a split bill"]` |
-| `ai_sort`, `ai_review` | Use Claude Code for sorting and reviews? | `true` |
+| `about_me` | Facts that help the AI sort | `["Money from friends is usually a split bill"]` |
+| `ai` | Which AI sorts and writes reviews? They run `margin setup-ai` (below) | `{"provider": "codex", "model": null}` |
+| `ai_sort`, `ai_review` | Use the AI for sorting and reviews? | `true` |
 | `extra_categories` | Their own categories | `{"out": ["Pets"], "in": ["Freelance"]}` |
 | `project_categories` | Big one-off projects, shown apart on Spent | `["Home renovation"]` |
 | `other_investments` | Savings, CDs, retirement accounts with no positions download, anything without a statement Margin reads | `[{"name": "401(k)", "kind": "retirement", "value": 52000, "cost": 40000}]` (`kind`: `retirement`, `cash` or `other`; optional `currency`, `as_of`) |
@@ -72,9 +74,18 @@ Ask, then write `~/Library/Application Support/Margin/settings.json` (create the
 | `lock_minutes` | Minutes away before Touch ID is needed (0 = off) | `2` |
 | `trusted_senders` | Extra bank senders (email domains, SMS IDs or US short codes), e.g. a credit union | `["mybank.in", "VM-MYBANK", "democu.org", "55512"]` |
 
-Others (rarely needed): `backfill_days` (365), `ai_model` ("sonnet"), `claude_path`, `fx_rates` (fallback rates,
-home currency per unit), `old_hostnames`, `indmoney` (`true` to read INDmoney order emails when the home currency
-isn't INR; with rupees at home they're always read).
+**Which AI**: they run `margin setup-ai` in their own Terminal. It lists the AIs installed on the Mac (Claude Code,
+Codex, Gemini CLI, a local Ollama), asks which one and which model, and for an API service (Grok, OpenAI,
+OpenRouter, Groq, Mistral, LM Studio) the address and the key, typed hidden into the Keychain. Then it asks one
+made-up test question. Without a terminal (you): `margin setup-ai --provider codex --no-test` (also `--model`,
+`--base-url`); an API key still needs their hidden prompt. Tell them where each AI sends what it's handed
+([README](README.md#works-with-any-ai)): Ollama and LM Studio keep it on the Mac. Each CLI must be signed in with
+its own login (`claude`, `codex`, `gemini`), since the nightly job doesn't see keys exported in a shell profile.
+
+Others (rarely needed): `backfill_days` (365), `ai_model` ("sonnet": Claude's model when `ai.model` is null),
+`claude_path`, `ai.path` (where another AI's CLI is), `ai.num_ctx` (Ollama's context size), `fx_rates`
+(fallback rates, home currency per unit), `old_hostnames`, `indmoney` (`true` to read INDmoney order emails when
+the home currency isn't INR; with rupees at home they're always read).
 
 **Living in the US**: `"currency": "USD"`, `"misc_below": 3`, their name as US banks print it in `self_names`.
 Then ask them to turn on alerts in each bank's and card's app: email (and text, if they forward texts) for every
@@ -146,7 +157,7 @@ In the US (no passwords; they download, you check):
   bank or broker (`chase-checking-1234.csv`, `fidelity-positions.csv`); every other CSV is read as before.
 
 Rows from bank files are stored without the fields that can carry the account holder's name or ids (`INDN:`,
-`ID:`, `CO ID:`, `IND NAME:`, `TRACE#:`...), so those never reach the page's text or Claude.
+`ID:`, `CO ID:`, `IND NAME:`, `TRACE#:`...), so those never reach the page's text or the AI.
 
 Check after the next `margin sync`: `margin doctor`, then the page's Net worth and Investments. Notes about files
 that couldn't be read show in the sync's problems ("Statements: ...").
@@ -175,7 +186,7 @@ Starting at login is their choice: **Open at Login** in the panel's ⋯ menu. Do
 ### 7. Sort out (they decide; 15 minutes)
 
 In the page's **Sort out**: pick categories for the biggest payees (each becomes a rule), mark unknown senders as
-*My bank* or *Not a bank*, and check what Claude sorted. You can help by explaining, but the choices are theirs.
+*My bank* or *Not a bank*, and check what the AI sorted. You can help by explaining, but the choices are theirs.
 
 ### Verify
 
@@ -187,7 +198,7 @@ next morning, "Updated … 12:0x am" at the top of the page.
 
 - **A sender Margin doesn't count**: `margin trust "<domain, SMS ID or short code>"`, or *My bank* in Sort out.
   A credit union or small US bank is usually just this: once trusted, its alerts are read like any US bank's.
-- **A format the reader can't parse**: with `ai_sort` on, Claude reads it at the next sync (amount, currency,
+- **A format the reader can't parse**: with `ai_sort` on, the AI reads it at the next sync (amount, currency,
   payee) and converts other currencies to the home currency. That's often enough.
 - **Teach the built-in reader** (`margin/parse.py`): add the sender to the bank list at the top (Indian banks:
   `BANK_TOKENS`; US banks: `US_DOMAINS` by email domain, `US_SHORT_CODES` and `_US_NAMES` for texts), then a
@@ -208,7 +219,7 @@ next morning, "Updated … 12:0x am" at the top of the page.
 - **Categories for local merchants** belong in the person's own `rules.json` (via Sort out or `margin rule`), not
   in `margin/categorize.py`, which holds only well-known national brands.
 - **Currencies**: `margin/money.py` lists symbols, decimals and locales; add one there if it's missing.
-- **Another country**: set its currency, trust its banks; Claude reads their alerts in any currency. A built-in
+- **Another country**: set its currency, trust its banks; the AI reads their alerts in any currency. A built-in
   reader for that country's wording follows the US one: its own patterns and `_parse_<country>`, picked by
   `currency_for`, so the Indian and US readers stay exactly as they are.
 
@@ -219,6 +230,11 @@ python3 -m unittest discover -s tests -t .     # all tests; they use a temporary
 ./margin-cli demo --fresh                      # see changes on made-up data
 ./margin-cli privacy-check                     # before every commit
 ```
+
+Everything Margin asks an AI goes through `llm.ask()`, which gives every provider the same payload and checks the
+answer against the job's schema. Test AI changes with the fake providers in `tests/test_llm.py`. Never send the
+person's data to an AI while working on the code; try a real CLI only with a made-up payload, and only after they
+agree (it uses their account).
 
 The page is `margin/dashboard.py` (one HTML template, built on request); after changing it, restart the page
 service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the demo. After changing
@@ -231,14 +247,15 @@ service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the 
 | `parse.py`, `categorize.py` | Reading bank alerts; built-in category rules (the person's own are in `rules.json`) |
 | `gmail.py`, `sms.py` | Read-only Gmail; the Messages database |
 | `money.py`, `fx.py` | Home currency, formatting and detection; exchange rates (ECB) |
-| `ai.py`, `review.py`, `invreview.py` | Claude sorting; spending reviews and checks; investment analysis |
+| `llm.py` | The one way to ask an AI (Claude Code, Codex, Gemini CLI, OpenAI-compatible APIs, Ollama): same payload for each, answers checked against the schema |
+| `ai.py`, `review.py`, `invreview.py` | AI sorting; spending reviews and checks; investment analysis |
 | `invest.py`, `cas.py`, `nps.py`, `usstocks.py`, `epf.py`, `fd.py`, `ppf.py`, `prices.py` | Investments |
 | `imports.py` | Bank, card and broker files downloaded into the statements folder (CSV, QFX/OFX) |
 | `networth.py`, `tidy.py` | Net worth; Sort out logic |
 | `server.py`, `dashboard.py`, `icon.py`, `lock.py`, `touchid.swift` | The local page, its server and the Touch ID lock |
 | `macapp.py`, `macapp.swift`, `glance.py` | The Margin app: the page in its own window and the menu bar glance (AppKit + WebKit, built with swiftc); the glance's figures |
 | `pdf.py`, `pdftext.swift`, `keychain.py` | Locked PDFs via PDFKit; Keychain secrets |
-| `demo.py` | The made-up demo people and the stand-ins for Claude, sync and Touch ID |
+| `demo.py` | The made-up demo people and the stand-ins for the AI, sync and Touch ID |
 | `privacy.py`, `.githooks/` | The leak guard |
 
 ### Made-up data

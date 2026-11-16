@@ -2,7 +2,7 @@
 
 For each payee still waiting for a category: up to three likely categories, each with the reason it was picked,
 from (in this order of trust):
-1. Claude's own guess, when the nightly sort looked at this payee but wasn't sure enough to apply it;
+1. The AI's own guess, when the nightly sort looked at this payee but wasn't sure enough to apply it;
 2. payees you've already sorted that share a word of the name (another "... General Stores");
 3. a word in the name itself ("... Medicals" is Medical, "... Tailors" a home service);
 4. the same amount about every month (a subscription);
@@ -108,7 +108,7 @@ def add(conn: sqlite3.Connection, payees: list[dict]) -> list[dict]:
     """Give each payee (from tidy.payee_list) "sugs": [{cat, src, ...}], best first."""
     if not payees:
         return payees
-    # 1. Claude's low-confidence guesses from the nightly sort
+    # 1. The AI's low-confidence guesses from the nightly sort (src "claude": the id it has always had)
     guesses = {}
     for r in conn.execute("""SELECT key, reason, detail FROM ai_decisions WHERE job='categories' AND verdict='unsure'
                              AND undone=0 AND key LIKE 'payee:%'"""):

@@ -1,5 +1,5 @@
 """Living in the US: bank texts from short codes, US alert shapes in dollars, balances and card dues,
-US brands, balances Claude reads. Downloaded files are in tests/test_files.py. Every message, name, number and
+US brands, balances the AI reads. Downloaded files are in tests/test_files.py. Every message, name, number and
 amount here is made up."""
 import tests  # noqa: F401  (first: points margin at a temporary data folder, see tests/__init__.py)
 
@@ -175,7 +175,7 @@ class Alerts(unittest.TestCase):
         self.assertEqual(t.amount, 12.34)
 
     def test_rupee_reader_is_untouched(self):
-        # The Indian reader still leaves a dollar spend from an Indian bank to Claude (tests/test_parse.py).
+        # The Indian reader still leaves a dollar spend from an Indian bank to the AI (tests/test_parse.py).
         self.assertEqual(parse.parse_alert("Spent Card no. XX1234 USD 8.75 14-12-22 10:42:18 SOME SITE Avl Lmt "
                                            "INR 86420.5").txns, [])
         self.assertEqual(parse.parse_alert("Rs.450.00 debited from your account").txns[0].amount, 450.0)
@@ -313,7 +313,7 @@ class Brands(unittest.TestCase):
         self.assertEqual(c("in", "ACME CORP", "ACME CORP DIRECT DEP"), "Salary")
 
 
-class ClaudeBalances(unittest.TestCase):
+class AIBalances(unittest.TestCase):
     def run_job(self, c, answers, settings):
         real = ai._ask
         seen = {}

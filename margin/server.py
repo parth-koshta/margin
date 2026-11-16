@@ -26,7 +26,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import ai, categorize, dashboard, db, icon, lock, networth, paths, review, suggest, sync, tidy
+from . import ai, categorize, dashboard, db, icon, llm, lock, networth, paths, review, suggest, sync, tidy
 
 IDLE_MINUTES = 20
 HOSTNAME = "margin.localhost"                  # *.localhost always means this Mac: Chrome and macOS never ask the
@@ -176,7 +176,8 @@ def _state(conn) -> dict:
         "queued": len(json.loads(db.get_state(conn, "refetch_email_ids") or "[]")),
         "reviews": review.listing(conn),
         "open_flags": len(review.open_flags(conn)),
-        "ai": {"on": bool(settings.get("ai_review", True)), "found": bool(review.claude_path(settings))},
+        "ai": {"on": bool(settings.get("ai_review", True)), "found": llm.ready(settings),
+               "name": llm.name(settings), "local": llm.is_local(settings)},   # e.g. "Codex"; local: on this Mac
         "sorting": {"on": bool(settings.get("ai_sort", True)), "running": _SORTING.locked(),
                     "last": json.loads(db.get_state(conn, "ai_last") or "null"),
                     "decisions": ai.listing(conn), "bank_hints": ai.bank_hints(conn)},
@@ -187,7 +188,7 @@ _SORTING = threading.Lock()
 
 
 def _sort_in_background() -> bool:
-    """Ask Claude to sort now, in a thread (it can take a few minutes). False if it's already running."""
+    """Ask the AI to sort now, in a thread (it can take a few minutes). False if it's already running."""
     if not _SORTING.acquire(blocking=False):
         return False
 

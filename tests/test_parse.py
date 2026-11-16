@@ -41,7 +41,7 @@ class Alerts(unittest.TestCase):
                               "SMS BLOCK 1234 to 910000000000, if not you.")
         self.assertEqual(r.txns[0].amount, 62.40)
         self.assertIsNone(r.balance)
-        # A foreign-currency spend has no rupee amount to read: left for Claude, who converts it at the day's rate.
+        # A foreign-currency spend has no rupee amount to read: left for the AI, which converts it at the day's rate.
         r = parse.parse_alert("Spent Card no. XX1234 USD 8.75 14-12-22 10:42:18 SOME SITE Avl Lmt INR 86420.5 "
                               "SMS BLOCK 1234 to 910000000000, if not you - Axis Bank")
         self.assertEqual(r.txns, [])

@@ -1,6 +1,7 @@
-"""Claude sorting: the judgement calls rules get wrong, made by Claude Code on this Mac at each sync.
+"""AI sorting: the judgement calls rules get wrong, made at each sync by the AI you chose (llm.py: Claude, Codex,
+Gemini, an OpenAI-compatible service such as Grok, or a model on this Mac through Ollama).
 
-Jobs, each sent in batches to `claude -p` (no tools, no connectors, no hooks, no saved session):
+Jobs, each sent in batches to that AI (no tools, no connectors, no hooks; llm.py says what each AI keeps):
   senders    unknown senders: hide shops/apps/ads; a sender that looks like a bank is only flagged
   unread     bank alerts the parser couldn't read: count real payments, record balances and card dues,
              drop non-payments
@@ -11,12 +12,14 @@ Jobs, each sent in batches to `claude -p` (no tools, no connectors, no hooks, no
   audit      every counted transaction checked against its message: amount, direction, payee, category,
              not-a-payment, double count (each transaction once; nightly that means the new ones)
   merged     every pair Margin merged as one payment: un-merge pairs that are really two payments
-Your own choices (categories you set, your rules) are never changed: Claude only suggests.
+Your own choices (categories you set, your rules) are never changed: the AI only suggests.
 
-Every decision is stored in ai_decisions with Claude's reason, shown in Sort out, and can be undone.
+Every decision is stored in ai_decisions with the AI's reason, shown in Sort out, and can be undone.
 An undone or "unsure" decision is left to you and not asked again (payees: again once they have new payments).
-What Claude sees: sender names, message text with 9+ digit numbers masked to the last 4, payee names,
-amounts, dates, your category list, your own rules and your names as banks print them.
+An answer that isn't JSON in the shape asked for is asked for once more; if it's still wrong, that batch's items
+are recorded "unsure" and left to you.
+What the AI sees (every AI the same): sender names, message text with 9+ digit numbers masked to the last 4, payee
+names, amounts, dates, your category list, your own rules and your names as banks print them.
 """
 from __future__ import annotations
 
@@ -25,7 +28,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
-from . import categorize, db, fx, money, parse, paths, review, sync, tidy
+from . import categorize, db, fx, llm, money, parse, paths, sync, tidy
 
 JOBS = ("senders", "unread", "doubles", "payees", "splits", "categories", "audit", "merged")
 LIMITS = {"senders": 60, "unread": 60, "doubles": 60, "payees": 120, "nameless": 80, "batch": 60}
@@ -156,6 +159,9 @@ def _paid_back() -> list[str]:
     return [c for c in tidy.SPEND if c != "Other spending"]
 
 
+NOTES: list[str] = []      # answers that were given up on, for run() to report (filled from worker threads too)
+
+
 def _ask(payload: dict, system: str, schema: dict, settings: dict) -> tuple[list, str]:
     home = money.home(settings)
     for token, value in (("<<WHERE>>", " in India" if home == "INR" else ""),
@@ -163,10 +169,26 @@ def _ask(payload: dict, system: str, schema: dict, settings: dict) -> tuple[list
                          ("<<SYM>>", money.symbol(home).strip())):
         system = system.replace(token, value)
     payload = {**payload, "home_currency": home}
-    out, err = review.ask_claude(payload, "sort", settings, system=system, schema=schema, timeout=600)
-    if out is None:
-        return [], err
+    try:
+        out = llm.ask(system, payload, schema, settings, timeout=600)
+    except llm.BadAnswer as e:     # answered twice, never in the right shape: each item is left to you, as unsure
+        items = [it for it in payload.get("items", []) if isinstance(it, dict) and "id" in it]
+        NOTES.append(f"{e} {len(items)} item{'s' if len(items) != 1 else ''} left for you.")
+        return [unsure(schema, str(it["id"])) for it in items], ""
+    except llm.AIError as e:       # couldn't ask (not installed, offline, too slow): asked again next time
+        return [], str(e)
     return [d for d in out.get("decisions", []) if isinstance(d, dict) and "id" in d], ""
+
+
+def unsure(schema: dict, item_id: str) -> dict:
+    """A decision that changes nothing, in the job's own shape: 'unsure', confidence 'low', no payee or bill."""
+    item = schema["properties"]["decisions"]["items"]
+    d = {"id": item_id, "reason": "The AI's answer couldn't be used"}
+    for k in item.get("required", []):
+        if k not in d:
+            enum = item["properties"].get(k, {}).get("enum") or []
+            d[k] = "unsure" if "unsure" in enum else "low" if "low" in enum else ""
+    return d
 
 
 def _home() -> str:
@@ -256,7 +278,7 @@ def job_unread(conn, settings) -> tuple[int, str]:
         last4 = re.sub(r"\D", "", d.get("last4") or "")[-4:] or None
         kind = "card" if d.get("card") else "account"
         note = "" if cur == home else fx_note(cur, amt, inr, rate, rate_src, home)
-        raw = f"[read by Claude]{note} {r['snippet']}"
+        raw = f"{READ_BY_AI}{note} {r['snippet']}"
         cat = sync._category(direction, payee or "", raw, inr, settings)
         cur_ = conn.execute(
             """INSERT OR IGNORE INTO transactions
@@ -277,7 +299,7 @@ def job_unread(conn, settings) -> tuple[int, str]:
 
 
 def _unread_balance(conn, settings, r, d, keep, cur, amt, bank) -> int:
-    """A balance Claude read: a checking or savings account's goes to balances, what's owed on a credit card to
+    """A balance the AI read: a checking or savings account's goes to balances, what's owed on a credit card to
     card_dues (both count in net worth). Loans, outstanding amounts and anything unclear are never recorded: left
     to the person. Returns 1 if recorded, 0 if not."""
     home, reason = money.home(settings), d.get("reason")
@@ -317,23 +339,25 @@ def fx_note(cur: str, amt: float, conv: float, rate: float, src: str, home: str 
             f"amount and any forex markup]")
 
 
-FX_NOTE_RE = re.compile(r"^\[read by Claude\] \[([A-Z]{3}) ([0-9.]+) ≈ [^\d\s\]]*[0-9,.]+ at [^\d\s\]]*[0-9.]+/[A-Z]{3}[^\]]*\]")
+READ_BY_AI = "[read by AI]"     # starts a payment the AI read; older ones start "[read by Claude]" (both are read)
+FX_NOTE_RE = re.compile(r"^(\[read by (?:Claude|AI)\]) \[([A-Z]{3}) ([0-9.]+) ≈ [^\d\s\]]*[0-9,.]+ at [^\d\s\]]*[0-9.]+/[A-Z]{3}[^\]]*\]")
 
 
 def reconvert(conn, settings) -> int:
-    """Re-convert foreign-currency payments Claude read, with the day's rate (fixes ones made at an old flat rate)."""
+    """Re-convert foreign-currency payments the AI read, with the day's rate (fixes ones made at an old flat rate)."""
     n = 0
-    for r in conn.execute("SELECT id, ts, amount, raw FROM transactions WHERE raw LIKE '[read by Claude] [%'").fetchall():
+    for r in conn.execute("SELECT id, ts, amount, raw FROM transactions WHERE raw LIKE '[read by Claude] [%' "
+                          "OR raw LIKE '[read by AI] [%'").fetchall():
         m = FX_NOTE_RE.match(r["raw"] or "")
         if not m:
             continue
-        cur, amt = m.group(1), float(m.group(2))
+        cur, amt = m.group(2), float(m.group(3))
         home = money.home(settings)
         rate, src = fx.rate(conn, cur, home, r["ts"][:10], settings)
         if rate is None:
             continue
         inr = round(amt * rate, 2)
-        raw = "[read by Claude]" + fx_note(cur, amt, inr, rate, src, home) + r["raw"][m.end():]
+        raw = m.group(1) + fx_note(cur, amt, inr, rate, src, home) + r["raw"][m.end():]   # its own "[read by …]"
         if abs(inr - r["amount"]) >= 0.01 or raw != r["raw"]:
             conn.execute("UPDATE transactions SET amount=?, raw=? WHERE id=?", (inr, raw, r["id"]))
             n += 1
@@ -431,7 +455,7 @@ def job_categories(conn, settings) -> tuple[int, str]:
             if ok:
                 categorize.add_user_rule(g["name"], cat, g["direction"], match_text=False)
                 rules = json.loads(paths.RULES_PATH.read_text())
-                rules[0]["by"] = "claude"
+                rules[0]["by"] = "claude"      # the id of the AI's rules (older rules.json files have it too)
                 paths.RULES_PATH.write_text(json.dumps(rules, indent=2, ensure_ascii=False) + "\n")
                 categorize.reload_rules()
                 applied += 1
@@ -473,7 +497,7 @@ def job_payees(conn, settings, progress=None) -> tuple[int, str]:
     batches = _batches(rows, LIMITS["batch"])
     results = _parallel([[{"id": str(r["id"]), **_row(r)} for r in b] for b in batches],
                         lambda b: _ask({"items": b}, PAYEES_SYSTEM, PAYEES_SCHEMA, settings), progress,
-                        "Claude is finding payees")
+                        "AI is finding payees")
     applied, errs = 0, []
     for b, (decisions, err) in zip(batches, results):
         if err:
@@ -560,8 +584,8 @@ AUDIT_SYSTEM = BASE + (
     "list is fine):\n"
     "- not_a_payment: the message doesn't report money that actually moved: reminders, dues or overdue notices, "
     "'will be debited' notices, mandate/AutoPay set-ups, OTPs, offers, failed or declined attempts, statements.\n"
-    "- wrong_amount: the amount doesn't match the text. fix_amount in <<CURRENCY>>. Text marked '[read by Claude] [USD … ≈ "
-    "<<SYM>>…]' was converted on purpose: don't report that.\n"
+    "- wrong_amount: the amount doesn't match the text. fix_amount in <<CURRENCY>>. Text marked '[read by AI] [USD … ≈ "
+    "<<SYM>>…]' (or '[read by Claude] …') was converted on purpose: don't report that.\n"
     "- wrong_direction: 'out' = money left the person, 'in' = money came in. fix_direction.\n"
     "- duplicate: the same single money movement as another item in this batch (e.g. an email and a text). "
     "duplicate_of = the other item's id.\n"
@@ -601,14 +625,14 @@ def _set_by(conn, r, settings: dict) -> str:
     if r["category_locked"] == 1:
         return "you"
     if r["category_locked"] == 2:
-        return "Claude"
+        return "AI"
     party = " ".join(x for x in (r["counterparty"], r["vpa"]) if x)
     if sync._is_self(party, r["raw"] or "", settings["self_names"]):
         return "your names"
     i = categorize.rule_index(r["direction"], party, r["raw"] or "")
     user = json.loads(paths.RULES_PATH.read_text()) if paths.RULES_PATH.exists() else []
     if i is not None and i < len(user):
-        return "Claude" if user[i].get("by") == "claude" else "your rule"
+        return "AI" if user[i].get("by") == "claude" else "your rule"
     return "default rule" if i is not None else "none"
 
 
@@ -617,7 +641,7 @@ def _batches(items: list, n: int) -> list[list]:
 
 
 def _parallel(batches: list, fn, progress=None, phase="") -> list:
-    """Run fn over batches, 3 at a time (separate claude processes). Results in order."""
+    """Run fn over batches, 3 at a time (separate requests to the AI). Results in order."""
     out, done = [None] * len(batches), 0
     with ThreadPoolExecutor(max_workers=3) as ex:
         futs = {ex.submit(fn, b): i for i, b in enumerate(batches)}
@@ -655,7 +679,7 @@ def job_audit(conn, settings, progress=None) -> tuple[int, str]:
         return AUDIT_SYSTEM + (AUDIT_FILE_NOTE if any(i["source"] == "file" for i in b) else "")
 
     results = _parallel(batches, lambda b: _ask({**ctx, "items": b}, system(b), AUDIT_SCHEMA, settings),
-                        progress, "Claude is checking every transaction")
+                        progress, "AI is checking every transaction")
     applied, errs = 0, []
     allowed = {"out": set(tidy.SPEND + tidy.BOTH), "in": set(tidy.INCOME + tidy.BOTH + _paid_back())}
     for batch, (decisions, err) in zip(batches, results):
@@ -735,7 +759,7 @@ def job_merged(conn, settings, progress=None) -> tuple[int, str]:
     batches = _batches([{"id": f"{p['d']}-{p['k']}", "kept": _row(get(p["k"])), "merged_into_it": _row(get(p["d"]))}
                         for p in pairs], LIMITS["batch"])
     results = _parallel(batches, lambda b: _ask({"items": b}, MERGED_SYSTEM, MERGED_SCHEMA, settings),
-                        progress, "Claude is checking merged payments")
+                        progress, "AI is checking merged payments")
     applied, errs = 0, []
     for batch, (decisions, err) in zip(batches, results):
         if err:
@@ -768,12 +792,14 @@ def run(conn, settings: dict, progress=None) -> dict:
     result = {"at": datetime.now().isoformat(timespec="seconds"), "applied": 0, "notes": []}
     if not settings.get("ai_sort", True):
         return result
-    if not review.claude_path(settings):
-        result["notes"].append("Claude Code isn't installed where Margin can find it (claude_path in settings.json).")
+    why = llm.missing(settings, keys=True)
+    if why:
+        result["notes"].append(why)
     else:
         for i, job in enumerate(JOBS):
             if progress:
-                progress("Claude is sorting", i, len(JOBS), force=True)
+                progress("AI is sorting", i, len(JOBS), force=True)
+            NOTES.clear()
             try:
                 fn = RUNNERS[job]
                 n, err = fn(conn, settings, progress) if job in ("payees", "audit", "merged") else fn(conn, settings)
@@ -782,6 +808,7 @@ def run(conn, settings: dict, progress=None) -> dict:
                     result["notes"].append(f"{job}: {err}")
             except Exception as e:   # noqa: BLE001 - one job failing must not stop the others or the sync
                 result["notes"].append(f"{job}: {e}")
+            result["notes"] += [f"{job}: {note}" for note in dict.fromkeys(NOTES)]
             conn.commit()
         sync.recategorize(conn, settings)
     db.set_state(conn, "ai_last", json.dumps(result))
@@ -855,7 +882,7 @@ def undo(conn, settings: dict, decision_id: int) -> bool:
 
 
 def accept(conn, settings: dict, decision_id: int) -> bool:
-    """Apply a suggestion Claude left for you (it touched one of your own choices)."""
+    """Apply a suggestion the AI left for you (it touched one of your own choices)."""
     d = conn.execute("SELECT * FROM ai_decisions WHERE id=?", (decision_id,)).fetchone()
     if not d or d["verdict"] != "suggest" or d["applied"]:
         return False

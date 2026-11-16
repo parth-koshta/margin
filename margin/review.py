@@ -3,26 +3,23 @@
 Two layers:
 1. Local checks, always, on this Mac: possible double charges, unusually large amounts, big first payments
    to new payees, recurring charges that changed price, late-night spends, foreign currency, new cards.
-2. Claude, if "ai_review" is on: the local Claude Code CLI reads a compact summary of the period (date, time,
+2. The AI you chose (llm.py), if "ai_review" is on: it reads a compact summary of the period (date, time,
    amount, payee, category, card/account label: never raw messages or full account numbers) plus the local
-   flags, and writes the headline, summary and any further flags. It runs with no tools, no connectors, no
-   hooks and no saved session, so it can only read what's handed to it and nothing is kept in Claude.
+   flags, and writes the headline, summary and any further flags. It runs with no tools, connectors or hooks,
+   so it can only read what's handed to it (llm.py says what each AI keeps).
 
-If Claude isn't available, the review is still written from the local checks.
+If the AI isn't available, the review is still written from the local checks.
 """
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
 import sqlite3
 import statistics
-import subprocess
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
-from . import db, money, paths
+from . import db, llm, money
 from .categorize import NON_FLOW
 
 KINDS = ("daily", "weekly", "monthly")
@@ -198,7 +195,7 @@ def _payload(conn, kind: str, start: date, end: date, flags: list[dict]) -> dict
     }
 
 
-# --- Claude -------------------------------------------------------------------------------------
+# --- the AI -------------------------------------------------------------------------------------
 SYSTEM = """You review one person's personal finances for a {kind} period. {where}
 You get JSON: totals, the period's transactions, each payee's recent history, and flags from automatic checks.
 The review is read after the period has ended: refer to it by its label ("On Mon 9 Nov", "Last week", "In
@@ -237,37 +234,13 @@ def system_for(kind: str, settings: dict) -> str:
     return SYSTEM.format(kind=kind, **money.prompt_bits(money.home(settings)))
 
 
-def claude_path(settings: dict) -> str | None:
-    cands = [settings.get("claude_path") or "", shutil.which("claude") or "", "/opt/homebrew/bin/claude",
-             "/usr/local/bin/claude", os.path.expanduser("~/.claude/local/claude"),
-             os.path.expanduser("~/.local/bin/claude")]
-    return next((c for c in cands if c and os.access(c, os.X_OK)), None)
-
-
-def ask_claude(payload: dict, kind: str, settings: dict, system: str | None = None,
-               schema: dict | None = None, timeout: int = 300) -> tuple[dict | None, str]:
-    exe = claude_path(settings)
-    if not exe:
-        return None, "Claude Code isn't installed where Margin can find it (set claude_path in settings.json)."
-    workdir = paths.DATA_DIR / "ai"
-    workdir.mkdir(mode=0o700, exist_ok=True)
-    cmd = [exe, "-p", "--no-session-persistence", "--tools", "", "--strict-mcp-config",
-           "--settings", json.dumps({"disableAllHooks": True}), "--model", settings.get("ai_model") or "sonnet",
-           "--output-format", "json", "--json-schema", json.dumps(schema or SCHEMA),
-           "--system-prompt", system or system_for(kind, settings)]
-    env = dict(os.environ, PATH=f"{os.path.dirname(exe)}:/usr/bin:/bin:/usr/sbin:/sbin")
+def ask_ai(payload: dict, kind: str, settings: dict, system: str | None = None,
+           schema: dict | None = None, timeout: int = 300) -> tuple[dict | None, str]:
+    """The AI's answer, checked against the schema, or (None, why not)."""
     try:
-        r = subprocess.run(cmd, input=json.dumps(payload, ensure_ascii=False), capture_output=True, text=True,
-                           timeout=timeout, cwd=str(workdir), env=env)
-    except subprocess.TimeoutExpired:
-        return None, f"Claude took too long ({timeout // 60} minutes)."
-    try:
-        out = json.loads(r.stdout)
-    except ValueError:
-        return None, f"Claude Code didn't answer (exit {r.returncode}). {(r.stderr or r.stdout).strip()[:200]}"
-    if out.get("is_error") or not isinstance(out.get("structured_output"), dict):
-        return None, f"Claude Code: {str(out.get('result') or out.get('subtype'))[:200]}"
-    return out["structured_output"], ""
+        return llm.ask(system or system_for(kind, settings), payload, schema or SCHEMA, settings, timeout), ""
+    except llm.AIError as e:
+        return None, str(e)
 
 
 # --- reviews ------------------------------------------------------------------------------------
@@ -295,7 +268,7 @@ def run(conn: sqlite3.Connection, kind: str, settings: dict, start: date | None 
     by_ai, note = 0, ""
     result = None
     if settings.get("ai_review", True) and payload["transactions"]:
-        result, note = ask_claude(payload, kind, settings)
+        result, note = ask_ai(payload, kind, settings)
     if result:
         by_ai = 1
         valid = {t["id"]: t for t in payload["transactions"]}
@@ -306,13 +279,14 @@ def run(conn: sqlite3.Connection, kind: str, settings: dict, start: date | None 
                 continue
             t = valid[ids[0]]
             local = next((x for x in flags if set(x["txn_ids"]) & set(ids)), None)
+            # "claude" below is the id the AI's own flags have always had (old reviews are stored with it)
             merged.append({"key": fkey(ids),
                            "check": local["check"] if local else "claude", "severity": f["severity"],
                            "title": f["title"][:90], "why": f["why"][:300], "txn_ids": ids, "date": t["when"],
                            "amount": t["amount"], "payee": t["payee"] or "", "account": t["account"] or "",
                            "source": "claude"})
             covered |= set(ids)
-        # keep high-severity local flags Claude didn't mention, so nothing serious is lost
+        # keep high-severity local flags the AI didn't mention, so nothing serious is lost
         merged += [f for f in flags if f["severity"] == "high" and not set(f["txn_ids"]) & covered]
         headline, summary, flags = result["headline"][:140], [s[:300] for s in result["summary"][:6]], merged
     else:

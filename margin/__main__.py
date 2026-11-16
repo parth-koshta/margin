@@ -275,6 +275,12 @@ def cmd_setup_pran(a) -> int:
                          'from:KCRA@kfintech.com subject:"Monthly Transaction Statement" has:attachment', "NPS statement")
 
 
+def cmd_setup_ai(a) -> int:
+    """Choose the AI that sorts and writes the reviews. An API key is typed hidden and kept in the Keychain."""
+    from . import llm
+    return llm.setup(a.provider, a.model, a.base_url, run_test=not a.no_test)
+
+
 def cmd_rule(a) -> int:
     categorize.add_user_rule(a.keyword, a.category, a.direction)
     conn = db.connect()
@@ -408,6 +414,13 @@ def main() -> int:
                    ).set_defaults(fn=cmd_setup_ppf)
     sub.add_parser("setup-pran", help="save your NPS PRAN in the Keychain so the NPS statement can be opened"
                    ).set_defaults(fn=cmd_setup_pran)
+    s = sub.add_parser("setup-ai", help="choose the AI that sorts and reviews: Claude, Codex, Gemini, an API service "
+                       "(Grok, OpenAI, OpenRouter...; key kept in the Keychain) or Ollama on this Mac")
+    s.add_argument("--provider", choices=["claude", "codex", "gemini", "openai-compatible", "ollama", "none"])
+    s.add_argument("--model", help="the model's name (default: the AI's own default; Claude: ai_model)")
+    s.add_argument("--base-url", help="an OpenAI-compatible service's address, e.g. https://api.x.ai/v1")
+    s.add_argument("--no-test", action="store_true", help="don't ask it a made-up test question")
+    s.set_defaults(fn=cmd_setup_ai)
     s = sub.add_parser("rule", help='categorize: margin rule "swiggy" "Food & dining"')
     s.add_argument("keyword")
     s.add_argument("category")

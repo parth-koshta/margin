@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS reviews (             -- daily / weekly / monthly rev
     UNIQUE (kind, start)
 );
 
-CREATE TABLE IF NOT EXISTS ai_decisions (        -- what Claude sorted, so it can be shown and undone
+CREATE TABLE IF NOT EXISTS ai_decisions (        -- what the AI sorted, so it can be shown and undone
     id INTEGER PRIMARY KEY, at TEXT NOT NULL, job TEXT NOT NULL, key TEXT NOT NULL, verdict TEXT NOT NULL,
     label TEXT, reason TEXT, detail TEXT, applied INTEGER DEFAULT 0, undone INTEGER DEFAULT 0,
     UNIQUE (job, key)
@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS inv_history (         -- value of each kind on each d
 CREATE TABLE IF NOT EXISTS stops (               -- your stop-loss levels; alerts only, nothing is ever sold
     key TEXT PRIMARY KEY, kind TEXT, name TEXT, price REAL NOT NULL, set_at TEXT, hit_at TEXT, hit_close REAL
 );
-CREATE TABLE IF NOT EXISTS inv_reviews (         -- Claude's weekly / monthly look at the investments
+CREATE TABLE IF NOT EXISTS inv_reviews (         -- the AI's weekly / monthly look at the investments
     id INTEGER PRIMARY KEY, kind TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, created TEXT NOT NULL,
     headline TEXT, summary TEXT, watch TEXT, by_ai INTEGER DEFAULT 0, note TEXT, UNIQUE (kind, start)
 );

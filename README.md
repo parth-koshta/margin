@@ -10,14 +10,14 @@ in a browser), behind Touch ID.
 - **Investments**: stocks, funds, retirement accounts, deposits and more, valued daily, with stop-loss alerts
   (alerts only: Margin never trades).
 - **Reviews**: daily, weekly and monthly summaries, plus checks for double charges, unusual amounts and new cards.
-- **Sorted by Claude** (optional): Claude Code on your Mac sorts what fixed rules can't, and every change can be
-  undone.
+- **Sorted by AI** (optional): the AI you already use (Claude, Codex, Gemini, Grok and other API services, or a
+  model on your Mac through Ollama) sorts what fixed rules can't, and every change can be undone.
 - **Any home currency**: amounts in other currencies are converted at the day's rate and keep their original
   (“£8.45 → $10.73”). Each currency is written its own way: ₹1,23,456 · $123,456 · ¥12,346.
 
 Built for **macOS**. It reads **Indian banks'** alerts out of the box (HDFC, ICICI, SBI, Axis, Kotak and more)
 and **US banks'** (Chase, Bank of America, Wells Fargo, Capital One, Discover, Citi, Amex and more), plus CDSL, NPS,
-EPFO, PPF and fixed-deposit statements, and the bank, card and broker files you download. With Claude sorting
+EPFO, PPF and fixed-deposit statements, and the bank, card and broker files you download. With AI sorting
 turned on, alerts in other formats and other currencies are read too; see
 [Other countries](#other-countries-and-currencies).
 
@@ -31,7 +31,7 @@ cd ~/projects/margin
 
 This opens <http://demo.margin.localhost:8765/> on a made-up person's money: Jordan in Seattle, in dollars.
 `./margin-cli demo --india` shows Kavya in Kochi, in rupees, with EPF, PPF and NPS. Everything works: Sync now
-plays a pretend sync, “Ask Claude to sort now” and the reviews are answered by a stand-in, and `--lock` starts
+plays a pretend sync, “Ask AI to sort now” and the reviews are answered by a stand-in, and `--lock` starts
 at the lock screen with a simulated Touch ID. The demo lives in `~/Library/Caches/Margin Demo/`, rebuilds
 itself each day so it always ends today, and whenever Margin's code changes (`--fresh` rebuilds now). It never
 touches real data or the internet. `--app` opens it in the Margin app's own window, with Margin in the menu bar,
@@ -40,13 +40,68 @@ Use it for screenshots and videos: it's the only Margin that should ever be on s
 
 ## Set it up
 
-**With a coding agent** (Claude Code or similar): open this folder and ask it to set Margin up. It follows
-[AGENTS.md](AGENTS.md), which covers every step, the checks after each one, and the steps only you can do
-(signing in to Google, granting Full Disk Access, typing statement passwords into hidden prompts).
+**With a coding agent** (Claude Code, Codex, Gemini CLI or similar): open this folder and ask it to set Margin
+up. It follows [AGENTS.md](AGENTS.md), which covers every step, the checks after each one, and the steps only you
+can do (signing in to Google, granting Full Disk Access, typing passwords and API keys into hidden prompts).
 
 **By hand**: follow the same steps in [AGENTS.md](AGENTS.md#setup), in order. You need macOS with the Xcode
-command line tools (`xcode-select --install`, which also provides Python 3.9+ and Swift), and optionally
-[Claude Code](https://claude.com/claude-code) for sorting and reviews.
+command line tools (`xcode-select --install`, which also provides Python 3.9+ and Swift), and optionally an AI
+for sorting and reviews ([any of these](#works-with-any-ai)).
+
+## Works with any AI
+
+The AI part is optional, and it works with whichever AI you use. It sorts what fixed rules can't (unknown
+senders, alerts the reader can't parse, payments reported twice, missing payees, categories, friends paying back
+their share of a bill) and writes the reviews and the investment analysis. Choose it with:
+
+```bash
+margin setup-ai
+```
+
+It lists the AIs installed on your Mac and asks which one and which model; for an API service it asks the address
+and the key (typed into a hidden prompt and kept in your macOS Keychain, never in a file). Then it asks the AI one
+made-up test question. It writes `"ai": {"provider": "codex", "model": null}` (for example) to `settings.json`;
+`"ai_sort"` and `"ai_review"` still turn sorting and reviews on and off.
+
+| AI | `provider` | Set up | Where what Margin hands it goes | What it keeps on your Mac |
+|---|---|---|---|---|
+| Claude | `claude` (the default) | Install [Claude Code](https://claude.com/claude-code); run `claude` once to sign in | Anthropic, under your Claude plan | No saved session (`--no-session-persistence`) |
+| Codex | `codex` | `npm install -g @openai/codex`; run `codex` once to sign in | OpenAI, under your ChatGPT plan or API account | No saved session or history (`--ephemeral`, history off) |
+| Gemini | `gemini` | `npm install -g @google/gemini-cli`; run `gemini` once to sign in | Google, under your Google account's or Gemini API key's terms | A copy of each run in `~/.gemini/tmp/…/chats`: Gemini CLI has no switch for it, and deletes them after 30 days by default |
+| Grok, OpenAI, OpenRouter, Groq, Mistral, or any OpenAI-compatible API | `openai-compatible`, with `base_url` | `margin setup-ai` → API service; type the key | That company (with OpenRouter, also the company running the model you pick) | Nothing (the key is in your Keychain) |
+| LM Studio, or another OpenAI-compatible server on your Mac | `openai-compatible`, with `"base_url": "http://localhost:1234/v1"` | Load a model and start LM Studio's server | **Nowhere: it stays on your Mac** | Whatever that server logs |
+| Ollama | `ollama` | Install [Ollama](https://ollama.com), `ollama pull <model>` | **Nowhere: it stays on your Mac** (only a local Ollama; its `-cloud` models are refused) | Nothing |
+
+Each one runs with the fewest powers it allows, for Margin's runs only (your own setup isn't changed):
+- **Claude Code**: `claude -p` with no tools, no MCP servers, hooks off and no saved session.
+- **Codex**: `codex exec` in its read-only sandbox, never asking for approval, with its shell, web search, apps,
+  plugins, hooks, image tools and MCP servers off, and no saved session (`--ephemeral`) or history.
+- **Gemini CLI**: `gemini -p` with every built-in tool, extension, MCP server, hook, skill and subagent off, and
+  Margin's instructions in place of its coding-agent ones (no `GEMINI.md` is loaded).
+- **API services and Ollama**: one chat request; they get no tools at all.
+
+The CLIs start in an empty folder of Margin's own. Sign in with the CLI's own login (`claude`, `codex`, `gemini`)
+rather than an API key exported in your shell profile: the nightly sync runs from launchd, which doesn't read your
+profile. `"model"` picks the model (`null` means the CLI's own default; for Claude, `ai_model`, which is
+`"sonnet"`). Smaller models get more wrong: Margin checks every answer against the shape it asked for, asks once
+more if it doesn't fit, and otherwise leaves those items to you.
+
+### What the AI sees
+
+Every AI gets exactly the same thing, built by Margin for each request:
+- **Sorting**: sender names, bank message text with every number of 9 or more digits cut to its last 4, payee
+  names, amounts, dates, your category list, your own rules, your names as banks print them and your `about_me`
+  notes.
+- **Reviews**: each payment's date, time, amount, payee, category and card or account label (never the message or
+  a full account number), the period's totals and the automatic checks' flags.
+- **Investment analysis**: your holdings' names, values, weights and returns, totals by type, benchmarks,
+  stop-loss levels and statement dates.
+
+It never gets your mailbox, your Messages, your statements, the database or your Keychain, and it can't look for
+them: its tools are off. Where it goes is in the table above: with Ollama or LM Studio nothing leaves your Mac;
+otherwise that company processes it under your plan's terms. Some free plans let the company keep what you send
+and use it to improve its models, so check your plan's data settings first. Turn the AI off with
+`margin setup-ai` → None (or `"ai_sort": false` and `"ai_review": false`); the automatic checks still run.
 
 ## Privacy
 
@@ -81,10 +136,10 @@ command line tools (`xcode-select --install`, which also provides Python 3.9+ an
 - **Downloaded statements** (bank, card and broker files you put in the statements folder) are read on your
   Mac. No Plaid, no aggregator, no bank login: Margin never connects to your bank.
   Exchange rates are the ECB's (frankfurter.dev): only currency codes and dates are sent.
-- **Claude** (optional) runs as Claude Code on your Mac (`claude -p`) with no tools, no connectors, no hooks
-  and no saved session. The text Margin hands it is processed by Anthropic under your Claude plan: payees,
-  amounts, dates, categories and message text with long numbers masked. Turn it off with `"ai_sort": false`
-  and `"ai_review": false`; the automatic checks still run.
+- **The AI** (optional) is the one you choose: Claude, Codex, Gemini, an API service such as Grok, or a model on
+  your Mac through Ollama. Each gets the same masked data and nothing else, with its tools off; see
+  [What the AI sees](#what-the-ai-sees). With Ollama or LM Studio nothing leaves your Mac. Turn it off with
+  `"ai_sort": false` and `"ai_review": false`; the automatic checks still run.
 - Logs record counts only. Notifications never show amounts or payees.
 
 ## Using it
@@ -94,6 +149,7 @@ command line tools (`xcode-select --install`, which also provides Python 3.9+ an
 | The Margin app (Spotlight), its m in the menu bar; in a browser `margin open`, then <http://margin.localhost/> | Home, Spending, Investments, Sort out, Reviews, Sync now; a quick glance from the menu bar |
 | `margin sync` | Sync now instead of waiting for midnight (or watch a running sync) |
 | `margin doctor` | Check that everything works |
+| `margin setup-ai` | Choose the AI that sorts and writes the reviews ([Works with any AI](#works-with-any-ai)) |
 | `margin rule "swiggy" "Food & dining"` | Put matching payees in a category (past and future) |
 | `margin trust "mybank.in"` | Count alerts from a sender Margin didn't know was a bank |
 | `margin tidy` | Sort out in Terminal instead of the page |
@@ -102,7 +158,7 @@ command line tools (`xcode-select --install`, which also provides Python 3.9+ an
 | `margin schedule status` | Is the nightly sync installed? |
 
 - **Sort out** lists payees without a category (pick one and it becomes a rule), senders that aren't a known
-  bank, and everything Claude sorted, each with Undo.
+  bank, and everything the AI sorted, each with Undo.
 - **How counting works**: only alerts from banks and card issuers count (merchant receipts would double-count).
   An alert that arrives by email and by text counts once. **Transfer** (card bills, moves between your own
   accounts) and **Investments** aren't income or spending. Add your name as banks print it to `self_names` so
@@ -128,7 +184,7 @@ command line tools (`xcode-select --install`, which also provides Python 3.9+ an
 
 The page shows each holding's value, gain on cost and weight, value over time, your market's benchmark (the
 Nifty 50 and S&P 500 with rupees at home, the S&P 500 otherwise), stop-losses (an alert the first time a close
-is at or below your level; Margin can't trade and never will), and Claude's weekly and monthly analysis, which
+is at or below your level; Margin can't trade and never will), and the AI's weekly and monthly analysis, which
 measures and describes but never recommends.
 
 ## Other countries and currencies
@@ -161,7 +217,7 @@ or a bank Margin doesn't know; categories for local shops and for Zelle or Venmo
 becomes a rule); retirement accounts with no download, CDs and the like in `other_investments`.
 
 **Elsewhere**, the built-in reader knows Indian and US banks' formats; alerts it can't read (other countries'
-banks, foreign-currency spends) go to Claude, who reads the amount, currency and payee, so turn on Claude sorting
+banks, foreign-currency spends) go to the AI, which reads the amount, currency and payee, so turn on AI sorting
 if your bank is elsewhere. Add your bank's sender with `margin trust`. Retirement accounts and savings go in
 `other_investments`. To teach the built-in reader a new bank format, see
 [AGENTS.md](AGENTS.md#adding-a-bank-or-a-country).

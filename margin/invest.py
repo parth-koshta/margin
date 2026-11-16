@@ -1,7 +1,7 @@
 """Investments: Indian stocks and mutual funds (CDSL CAS), US stocks (INDmoney, or broker files), NPS and more.
 
 update() runs in the nightly sync and does everything that needs the network: new statements, new INDmoney orders,
-closing prices, today's values, stop-loss checks and Claude's weekly / monthly analysis. snapshot() only reads the
+closing prices, today's values, stop-loss checks and the AI's weekly / monthly analysis. snapshot() only reads the
 database, for the pages.
 
 Stop-losses here are alerts only. Nothing in Margin can place, change or cancel an order.

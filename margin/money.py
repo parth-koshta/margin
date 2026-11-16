@@ -119,7 +119,7 @@ def configured() -> str:
 
 
 def prompt_bits(code: str) -> dict:
-    """How Claude's instructions describe the money (unchanged wording for rupees)."""
+    """How the AI's instructions describe the money (unchanged wording for rupees)."""
     if code == "INR":
         return {"where": "They live in India; amounts are INR.", "sym": "₹",
                 "where_inv": "They live in India;\nvalues are in rupees (INR) unless marked USD.",
@@ -130,7 +130,7 @@ def prompt_bits(code: str) -> dict:
             "style": f"Use {sym} with the usual digit grouping ({fmt(123456, code)})."}
 
 
-ORIGINAL_RE = re.compile(r"^(?:\[read by Claude\])?\s*\[([A-Z]{3}) ([0-9.]+) ≈ ")
+ORIGINAL_RE = re.compile(r"^(?:\[read by (?:Claude|AI)\])?\s*\[([A-Z]{3}) ([0-9.]+) ≈ ")   # old notes say Claude
 
 
 def original(raw: str | None) -> tuple[str, float] | None:

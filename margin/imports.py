@@ -398,7 +398,7 @@ _DESC_PREFIX = re.compile(
 
 # ACH descriptions carry fields that can hold the account holder's name or ids (Bank of America's "INDN:", "ID:",
 # "CO ID:", Chase's "IND NAME:", "IND ID:", "TRACE#:"). They're dropped before a row is stored, so they never
-# reach the page's text or Claude. "DES:" and "CO ENTRY DESCR:" stay: they say what the payment is (PAYROLL).
+# reach the page's text or the AI. "DES:" and "CO ENTRY DESCR:" stay: they say what the payment is (PAYROLL).
 _LABELS = (r"DES|INDN|IND ?NAME|IND ?ID|INDIVIDUAL ID|CO ID|ID|CO ENTRY DESCR|ORIG CO NAME|ORIG ID|ORIG CO ID|DESC DATE|"
            r"SEC|TRACE ?#?|TRN|EED|PPD ID|WEB ID|CCD ID|CO NAME|RECEIVER|RECIPIENT")
 _PRIVATE = re.compile(

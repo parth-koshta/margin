@@ -1,4 +1,4 @@
-"""Claude's look at the investments: weekly (each Monday, for the week before) and monthly (when the month's CDSL
+"""The AI's look at the investments: weekly (each Monday, for the week before) and monthly (when the month's CDSL
 statement arrives). It measures and describes: returns against Nifty 50 / S&P 500, what moved, concentration and
 stop-losses that are close. It never says what to buy or sell; the decisions stay with you.
 """
@@ -155,8 +155,8 @@ def run(conn: sqlite3.Connection, settings: dict, kind: str, force: bool = False
         return None      # no values near the period's start and end: wait rather than estimate
     result, note = (None, "")
     if settings.get("ai_review", True):
-        result, note = review.ask_claude(p, kind, settings, system=SYSTEM.format(kind=kind, **money.prompt_bits(money.home(settings))), schema=SCHEMA,
-                                         timeout=300)
+        result, note = review.ask_ai(p, kind, settings, system=SYSTEM.format(kind=kind, **money.prompt_bits(money.home(settings))), schema=SCHEMA,
+                                     timeout=300)
     if result:
         head, summary, watch, by_ai = result["headline"][:140], [x[:300] for x in result["summary"][:6]], \
             [{"title": w["title"][:90], "why": w["why"][:300]} for w in result["watch"][:4]], 1

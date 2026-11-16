@@ -18,11 +18,13 @@ DEFAULT_SETTINGS = {
     "self_names": [],        # your own name(s) as banks print them, to spot transfers to yourself
     "currency": "INR",       # your home currency (money.py): everything is shown and totalled in it
     "misc_below": 100,       # uncategorised spends below this much (home currency) go to Miscellaneous (0 = off)
-    "ai_review": True,       # daily/weekly/monthly review written by Claude Code on this Mac (false = local checks only)
-    "ai_model": "sonnet",    # model alias for the review
+    "ai": {"provider": "claude", "model": None},   # which AI sorts and reviews (llm.py; margin setup-ai): claude,
+                             # codex, gemini, openai-compatible (+ base_url; key in the Keychain) or ollama
+    "ai_review": True,       # daily/weekly/monthly review written by the AI (false = local checks only)
+    "ai_model": "sonnet",    # Claude's model when ai.model isn't set
     "claude_path": "",       # leave empty to find the claude command automatically
-    "about_me": [],          # facts about you that help Claude sort, e.g. "Money from friends is usually a split bill"
-    "ai_sort": True,         # Claude sorts new senders, payees, unreadable alerts and double counts at each sync
+    "about_me": [],          # facts about you that help the AI sort, e.g. "Money from friends is usually a split bill"
+    "ai_sort": True,         # the AI sorts new senders, payees, unreadable alerts and double counts at each sync
     "fx_rates": {"USD": 94.0, "EUR": 108.0, "GBP": 124.0},   # home currency per unit, ONLY if the rate service is down
     "extra_categories": {"out": [], "in": []},   # your own categories, e.g. {"out": ["Pets"], "in": ["Freelance"]}
     "project_categories": [],  # big one-off projects (e.g. "Home renovation"): spending, shown apart on Spent
@@ -250,8 +252,8 @@ def reparse_parties(conn: sqlite3.Connection, settings: dict) -> int:
     # senders it no longer treats as a bank (fund houses, insurers), are removed.
     for r in conn.execute("SELECT id, raw, sender, bank FROM transactions WHERE source != 'file'").fetchall():
         raw = r["raw"] or ""
-        us_by_claude = cur(r) == "USD" and raw.startswith("[read by Claude]")   # Claude already judged it a payment
-        if ((not us_by_claude and parse.is_not_payment(parse.normalize(raw), cur(r)))
+        us_by_ai = cur(r) == "USD" and raw.startswith(("[read by AI]", "[read by Claude]"))   # the AI judged it a payment
+        if ((not us_by_ai and parse.is_not_payment(parse.normalize(raw), cur(r)))
                 or not parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"], raw, home)):
             conn.execute("UPDATE transactions SET duplicate_of=NULL WHERE duplicate_of=?", (r["id"],))
             conn.execute("DELETE FROM transactions WHERE id=?", (r["id"],))
@@ -410,12 +412,12 @@ def run(quiet_notify: bool = False) -> int:
 
     if db.get_state(conn, "parser_version") != str(parse.PARSER_VERSION):
         reparse_parties(conn, settings)
-    try:   # Claude sorting must never break the sync
+    try:   # AI sorting must never break the sync
         from . import ai
         sorted_ = ai.run(conn, settings, progress)
-        problems += [f"Claude sorting: {n}" for n in sorted_["notes"]]
+        problems += [f"AI sorting: {n}" for n in sorted_["notes"]]
     except Exception as e:   # noqa: BLE001
-        problems.append(f"Claude sorting: {e}")
+        problems.append(f"AI sorting: {e}")
     try:   # investments must never break the sync either
         from . import invest
         problems += invest.update(conn, settings, progress)

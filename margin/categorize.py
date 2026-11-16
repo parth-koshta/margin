@@ -33,7 +33,7 @@ DEFAULT_RULES: list[tuple[list[str], str, str | None, bool]] = [
       "wells fargo card", "us bank card", "credit one bank"], "Transfer", None, PAYEE_ONLY),
     # Moving money between your own pockets in the US: card payments as the card issuer words them, transfers
     # between your own checking and savings, and money to or from your own Venmo / PayPal / Cash App balance.
-    # (A Zelle or Venmo payment to another person is spending: it's left for your rules, or to Claude.)
+    # (A Zelle or Venmo payment to another person is spending: it's left for your rules, or to the AI.)
     (["payment thank you", "payment - thank you", "payment-thank you", "pymt thank you", "received your payment",
       "autopay payment", "credit crd autopay", "crd epay", "crcardpmt", "online transfer to sav",
       "online transfer from sav", "online transfer to chk", "online transfer from chk", "transfer to savings",

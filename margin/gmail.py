@@ -1,4 +1,4 @@
-"""Read-only Gmail access with your own Google sign-in. No Claude connector involved.
+"""Read-only Gmail access with your own Google sign-in. No AI connector involved.
 
 Setup (once): create a Google Cloud OAuth client of type "Desktop app", then run
 `margin setup-gmail path/to/client_secret.json`. The browser asks you to approve
