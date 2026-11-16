@@ -738,5 +738,21 @@ class SecurityFixes(FakeCLI):
                 (first / "left-behind.txt").unlink()
 
 
+class ReReadKeepsWhatTheAIRead(unittest.TestCase):
+    def test_a_us_payment_the_ai_read_survives_a_re_read_with_either_note(self):
+        from margin import sync
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(db.SCHEMA)
+        text = "Chase: A payment of $25.00 will be debited on Nov 20 from your account ending in 1234."  # made up
+        for i, who in enumerate(("[read by AI] ", "[read by Claude] ", "")):
+            conn.execute("INSERT INTO transactions(uid, source, sender, bank, ts, amount, direction, raw, category) "
+                         "VALUES (?,?,?,?,?,?,?,?,?)", (f"r{i}", "email", "Chase <no.reply.alerts@chase.com>", "Chase",
+                                                       "2026-11-02T10:00:00", 25.0, "out", who + text, "Other spending"))
+        sync.reparse_parties(conn, {"currency": "USD", "trusted_senders": [], "self_names": []})
+        left = sorted(r[0] for r in conn.execute("SELECT uid FROM transactions"))
+        self.assertEqual(left, ["r0", "r1"])          # the reader's own "will be debited" row is dropped; the AI's stay
+
+
 if __name__ == "__main__":
     unittest.main()
