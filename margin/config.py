@@ -4,8 +4,9 @@ Personal settings (names, balances, holdings, facts about you) are never printed
 they're set and how many entries they have. `--show` prints them, for the person in their own Terminal (Claude
 Code's data guard refuses --show). Secrets are refused outright: they belong in the Keychain, through the hidden
 prompts of `margin setup-pan`, `setup-pran`, `setup-ppf` and `setup-gmail`. So are settings that name a program
-(claude_path and the like): the nightly sync would run it with prompts built from the person's money data, so
-only the person sets those, by hand in settings.json.
+or an address (claude_path, anything with path, command, url...): the nightly sync would run that program, or send
+prompts built from the person's money data to that address, so only the person sets those, by hand. Which AI
+Margin asks (`ai`) is chosen with `margin setup-ai`, which checks the AI before saving it.
 """
 from __future__ import annotations
 
@@ -16,12 +17,17 @@ import re
 from . import paths
 
 # Settings that aren't in sync.DEFAULT_SETTINGS (no value until the person adds one), with their type.
-OPTIONAL = {"lock_minutes": (int, float), "other_investments": list, "us_snapshot": dict, "ppf": list}
+OPTIONAL = {"lock_minutes": (int, float), "other_investments": list, "us_snapshot": dict, "ppf": list,
+            "indmoney": bool}
 # Their values describe the person (names, money, facts): shown only as "set, N entries" unless --show.
 PERSONAL = {"self_names", "about_me", "other_investments", "us_snapshot", "ppf", "old_hostnames", "ignored_senders",
             "project_categories", "trusted_senders", "extra_categories"}
 # Settings naming a program the nightly sync runs (with prompts built from money data): set by hand only.
-PROGRAM_KEY = re.compile(r"(?i)path|command|cmd|exe|binary|program|script|hook|shell")
+# Settings naming a program the nightly sync runs, or an address it sends to (prompts built from money data): set by
+# hand only. (Not "host": old_hostnames only lists names the page answers to on this Mac.)
+PROGRAM_KEY = re.compile(r"(?i)path|command|cmd|exe|binary|program|script|hook|shell|url|uri|endpoint|provider|"
+                         r"server")
+AI_KEYS = {"ai"}       # which AI is asked, and so where what it's handed goes: margin setup-ai
 SECRET_KEY = re.compile(r"(?i)^(pan|pran)$|pan_|_pan$|pran|password|passwd|passcode|secret|token|ppf_statement|"
                         r"api_?key|private_?key|aadhaar|ssn")
 SECRET_VALUE = [
@@ -140,10 +146,19 @@ def check_key(key: str) -> None:
         raise Refused(f"There's no setting called {key!r}. Settings: {', '.join(sorted(known()))}.")
 
 
+AI_HINT = ("Which AI Margin asks decides where what it's handed goes, so it's chosen with margin setup-ai, which "
+           "checks the AI answers and can't read files before saving it: the person runs it in their own Terminal "
+           "(or, with their choice, margin setup-ai --provider <name>). An API key goes into its hidden prompt.")
+
+
 def set_value(key: str, text: str) -> object:
-    check_key(key)
+    if SECRET_KEY.search(key):
+        raise Refused(secret_hint(key))
+    if re.split(r"[.\[]", key)[0] in AI_KEYS:           # ai, ai.path, ai.base_url, ai[provider]...
+        raise Refused(AI_HINT)
     if PROGRAM_KEY.search(key):
         raise Refused(PROGRAM_HINT)
+    check_key(key)
     for what, rx in SECRET_VALUE:
         if rx.search(text):
             raise Refused(f"That value looks like {what}. Secrets go in the Keychain through margin's setup-* "

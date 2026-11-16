@@ -86,8 +86,10 @@ margin config get                    # what's set; personal values show only as 
 ```
 
 `config set` checks the type and refuses secrets (it names the hidden-prompt command instead). It also refuses
-settings that name a program (`claude_path` and the like): the nightly sync would run it with prompts built from
-their money data, so only the person sets those, by hand. Nobody else needs to open the file.
+settings that name a program or an address (`claude_path`, `ai.path`, `ai.base_url`, anything with path, command
+or url): the nightly sync would run that program, or send prompts built from their money data to that address,
+so only the person sets those, by hand. The AI itself (`ai`) is chosen with `margin setup-ai` (see "Which AI"),
+which checks it before saving. Nobody else needs to open the file.
 
 | Key | Ask them | Example |
 |---|---|---|
@@ -129,7 +131,8 @@ transaction, deposits, the daily available balance, and the statement. That's wh
 ### Steps 3 to 5 are theirs
 
 `margin setup --json` lists each one that's still open under `waiting_on_you`, with the instructions in its
-`how`. The details are below; walk them through one or two steps at a time.
+`how`, and the optional ones (statement passwords, the AI) as `optional`. The details are below; walk them
+through one or two steps at a time.
 
 ### 3. Gmail, read-only (they do it; about 10 minutes)
 

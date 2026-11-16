@@ -62,17 +62,24 @@ Until step 1 is done, `margin` means `./margin-cli` in the repository folder.
    `margin setup-ppf` there. Check: `secrets_saved` in `margin doctor --json`. EPF passbooks and other brokers'
    CSV exports go in the `statements` folder: tell them the path from the step's `how`; don't open it yourself.
 
-8. **First sync.** Once Gmail is connected, `margin setup --json` lists "start the first sync" under
+8. **The AI** (the `ai` step; optional). It's their choice which AI Margin hands its masked data to, and where
+   that goes ([README](../../../README.md#works-with-any-ai)). If the step isn't `ok`, tell them what its notes
+   say and ask them to run `margin setup-ai` in their own Terminal: it lists what's installed, asks, types any API
+   key hidden, and checks the AI before saving. If they tell you which one and it needs no key, you may run
+   `margin setup-ai --provider <name>` (never with `--no-test`). `margin config set` refuses `ai`, `ai.path` and
+   addresses. Check: `ai.ready` in `margin doctor --json`.
+
+9. **First sync.** Once Gmail is connected, `margin setup --json` lists "start the first sync" under
    `would_change`; tell them it reads 12 months of mail and can take an hour, and on their yes run
    `margin setup --yes --json`. Watch with `margin doctor --json` (`sync.progress`), not by reading logs.
 
-9. **Verify** (AGENTS.md "Verify"):
+10. **Verify** (AGENTS.md "Verify"):
    - `margin setup --json`: `would_change`, `waiting_on_you` and `failed` empty.
    - `margin doctor --json` after the first sync: every check ok (the `sms` check passes once a sync has read
      texts); `counts.transactions` above 0.
    - Tell them to open **Margin** from Spotlight once in each browser they use and bookmark
      http://margin.localhost/ (Touch ID asks). You don't open it.
 
-10. **Sort out** (AGENTS.md step 7) is theirs, on the page. You can explain how it works; the choices are theirs.
+11. **Sort out** (AGENTS.md step 7) is theirs, on the page. You can explain how it works; the choices are theirs.
 
 Finish with a short summary: what's set up, what's waiting on them, and `margin doctor` for next time.

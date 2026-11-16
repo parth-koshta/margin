@@ -85,9 +85,21 @@ class Config(unittest.TestCase):
                 self.assertIsNone(config.SECRET_KEY.search(key))
                 self.assertEqual(bool(config.PROGRAM_KEY.search(key)), key == "claude_path")
 
+    def test_which_ai_is_chosen_with_setup_ai(self):
+        for key, value in (("ai", '{"provider": "gemini", "model": null}'), ("ai.path", "/tmp/not-an-ai.sh"),
+                           ("ai.base_url", "https://ai.example/v1"), ("ai.provider", "codex")):
+            with self.subTest(key=key):
+                rc, out = self.cfg("set", key, value)
+                self.assertEqual(rc, 1)
+                self.assertIn("margin setup-ai", out)
+        self.assertFalse(paths.SETTINGS_PATH.exists())
+        self.assertIn('"provider": "claude"', self.cfg("get", "ai")[1])    # reading it is fine
+
     def test_programs_are_set_by_hand_only(self):
         for key, value in (("claude_path", "/tmp/not-claude.sh"), ("fx_rates", '{"command": "x"}'),
-                           ("extra_categories", '{"out": [], "in": [], "hook": "x"}')):
+                           ("extra_categories", '{"out": [], "in": [], "hook": "x"}'),
+                           ("fx_rates", '{"base_url": "https://ai.example/v1"}'), ("gemini_path", "/tmp/x"),
+                           ("ollama_url", "http://192.0.2.1:11434"), ("endpoint", "https://ai.example")):
             with self.subTest(key=key):
                 rc, out = self.cfg("set", key, value)
                 self.assertEqual(rc, 1)
@@ -126,7 +138,8 @@ class Doctor(unittest.TestCase):
                      "'Other spending')", (self.AMOUNT, self.PAYEE))
         status = {"at": "2026-01-02T00:01:00", "ok": False, "counts": {},
                   "problems": [f"Statements: {self.PAYEE}.csv: no rows with a value", "Gmail (partial): 3 emails",
-                               f"Investments, prices: No price yet for {self.PAYEE}"], "sms": "off"}
+                               f"Investments, prices: No price yet for {self.PAYEE}",
+                               f"AI sorting: couldn't read {self.PAYEE}"], "sms": "off"}
         db.set_state(conn, "last_sync", json.dumps(status))
         conn.commit()
         conn.close()
@@ -146,8 +159,10 @@ class Doctor(unittest.TestCase):
         self.assertEqual(r["counts"]["uncategorized_last_year"], 1)
         self.assertEqual(r["counts"]["rules"], 1)
         last = next(c for c in r["checks"] if c["id"] == "last_sync")
-        self.assertEqual(last["problems"], 3)
-        self.assertEqual(last["problem_areas"], {"Statements": 1, "Gmail": 1, "Investments": 1})
+        self.assertEqual(last["problems"], 4)
+        self.assertEqual(last["problem_areas"], {"Statements": 1, "Gmail": 1, "Investments": 1, "AI sorting": 1})
+        self.assertEqual(r["ai"]["provider"], "claude")
+        self.assertIn(r["ai"]["ready"], (True, False))
         self.assertEqual(r["secrets_saved"], {"gmail": False, "pan": False, "pran": False, "ppf_statement": False})
         self.assertTrue(all("text" not in c for c in r["checks"]))
         self.assertEqual(next(c for c in r["checks"] if c["id"] == "gmail")["ok"], False)
@@ -165,7 +180,7 @@ class Doctor(unittest.TestCase):
         with NO_KEYCHAIN, NOT_LOADED, mock.patch("margin.gmail.is_configured", return_value=False):
             rc, out = _out(health.main, False, "/nonexistent/Margin.app")
         self.assertNotIn(self.PAYEE, out)
-        self.assertIn("3 problems (Statements 1, Gmail 1, Investments 1)", out)
+        self.assertIn("4 problems (Statements 1, Gmail 1, Investments 1, AI sorting 1)", out)
         line = f"2026-01-02 00:01:00 sync with problems in 9s: 3 emails | Statements: {self.PAYEE}.csv: no rows"
         self.assertNotIn(self.PAYEE, health.screen_line(line))
         self.assertIn("1 problem (margin doctor", health.screen_line(line))
@@ -277,6 +292,24 @@ class Setup(unittest.TestCase):
             rc, out = self.run_setup(self.args(json=False, yes=False), terminal=True)
         self.assertIn("Nothing was changed", out)
         self.assert_nothing_changed()
+
+    def test_the_ai_is_the_persons_choice(self):
+        with mock.patch("margin.llm.missing", return_value="Codex isn't installed where Margin can find it."):
+            step = install.step_ai()
+        self.assertEqual((step.who, step.status), ("you", "optional"))
+        self.assertIn("margin setup-ai", step.how)
+        with mock.patch("margin.llm.missing", return_value=""):
+            self.assertEqual(install.step_ai().status, "ok")
+        config.set_value("ai_sort", "false")
+        config.set_value("ai_review", "false")
+        self.assertEqual(install.step_ai().status, "skipped")
+
+    def test_in_their_own_terminal_it_offers_setup_ai(self):
+        chose = []
+        with mock.patch("margin.llm.missing", return_value="No AI yet."), \
+                mock.patch.object(install, "_yes", return_value=True):
+            install.walk_ai(install.step_ai(), {"ai": lambda: chose.append("setup-ai")})
+        self.assertEqual(chose, ["setup-ai"])
 
     def test_stops_when_the_mac_needs_the_command_line_tools(self):
         rc, out = self.run_setup(mac_ok=False)

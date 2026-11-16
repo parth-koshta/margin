@@ -357,8 +357,10 @@ def _install_hooks() -> dict:
 
 def cmd_setup(a) -> int:
     from . import install
+    ai = argparse.Namespace(provider=None, model=None, base_url=None, no_test=False)
     return install.setup(a, secret_prompts={"pan": lambda: cmd_setup_pan(a), "pran": lambda: cmd_setup_pran(a),
-                                            "ppf_statement": lambda: cmd_setup_ppf(a)}, **_install_hooks())
+                                            "ppf_statement": lambda: cmd_setup_ppf(a),
+                                            "ai": lambda: cmd_setup_ai(ai)}, **_install_hooks())
 
 
 def cmd_update(a) -> int:

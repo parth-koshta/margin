@@ -62,8 +62,8 @@ Set up Margin on this Mac for me with the margin-setup skill. Do every step you 
 Claude shows you what `margin setup` will add to your Mac (the `margin` command, a line in `~/.zshrc`, your
 private data folder, two LaunchAgents and the Margin app) and goes ahead only when you say yes. It asks you a few
 questions (your currency, your name as banks print it) and walks you through the steps only you can do: signing
-in to Google, turning on text forwarding and Full Disk Access, and typing statement passwords into hidden prompts
-in your own Terminal. Later, "update Margin" uses the `margin-update` skill, and "Margin doesn't count my bank"
+in to Google, turning on text forwarding and Full Disk Access, typing statement passwords into hidden prompts in
+your own Terminal, and choosing the AI, if you want one (`margin setup-ai`). Later, "update Margin" uses the `margin-update` skill, and "Margin doesn't count my bank"
 the `margin-add-bank` skill.
 
 Claude learns how things stand from `margin doctor --json`, which holds statuses and counts only, and in this

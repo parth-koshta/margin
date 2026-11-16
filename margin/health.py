@@ -19,7 +19,7 @@ from pathlib import Path
 from . import config, paths
 
 SECRETS = {"pan": "margin setup-pan", "pran": "margin setup-pran", "ppf_statement": "margin setup-ppf"}
-AREAS = {"Gmail", "SMS", "Claude sorting", "Investments", "Statements", "Review"}   # where sync problems come from
+AREAS = {"Gmail", "SMS", "AI sorting", "Claude sorting", "Investments", "Statements", "Review"}   # sync problems
 
 
 def python() -> str:
@@ -198,6 +198,17 @@ def counts() -> dict:
     return out
 
 
+def ai_status(settings: dict) -> dict:
+    """Which AI sorts and reviews, and whether it can be asked: names and yes/no only."""
+    from . import llm
+    on = bool(settings.get("ai_sort", True) or settings.get("ai_review", True))
+    try:
+        ready = on and not llm.missing(settings)
+        return {"on": on, "provider": llm.config(settings)["provider"], "name": llm.name(settings), "ready": ready}
+    except Exception:   # noqa: BLE001  a broken ai setting mustn't break doctor
+        return {"on": on, "provider": None, "name": None, "ready": False}
+
+
 def report(app_path: str) -> dict:
     """Everything `margin doctor --json` prints."""
     from . import gmail
@@ -225,6 +236,7 @@ def report(app_path: str) -> dict:
             "personal": {k: config.size(settings.get(k)) for k in sorted(config.PERSONAL)},
         },
         "secrets_saved": secrets,
+        "ai": ai_status(settings),
         "sync": {"running": progress is not None, "progress": progress},
         "app": {"installed": os.path.exists(app_path), "page_service": _loaded(paths.WEB_LABEL)},
         "margin": {"commit": _git("rev-parse", "--short", "HEAD"), "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),

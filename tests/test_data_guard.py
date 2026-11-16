@@ -127,7 +127,9 @@ class Allows(unittest.TestCase):
         for cmd in ("margin doctor --json", "./margin-cli doctor", "margin setup --json", "margin update --check",
                     "margin config get", "margin config get currency", "margin config set currency USD",
                     "margin sync", "margin demo --india --no-open", "margin schedule status", "margin open",
-                    "margin rule acme Shopping", 'margin trust "mybank.example"', "margin setup-gmail ~/Downloads/x.json"):
+                    "margin rule acme Shopping", 'margin trust "mybank.example"', "margin setup-gmail ~/Downloads/x.json",
+                    "margin setup-ai --provider codex", "margin setup-ai --provider ollama --model demo-model",
+                    "margin setup-ai", "margin config get ai"):
             with self.subTest(cmd=cmd):
                 self.assertIsNone(bash(cmd))
 
@@ -137,6 +139,13 @@ class Allows(unittest.TestCase):
         self.assertIsNone(decide("mcp__browser__navigate", url="http://demo.margin.localhost:8765/"))
         tmp = tempfile.gettempdir() + "/margin-tests-x"
         self.assertIsNone(decide("Read", file_path=tmp + "/money.db", env={"MARGIN_DATA": tmp}))
+
+    def test_the_ai_start_folder(self):
+        # Margin starts the AI CLIs in an empty folder in the temporary folder, outside the data folder.
+        start = os.path.join(tempfile.gettempdir(), f"margin-ai-{os.getuid()}")
+        self.assertIsNone(decide("Read", file_path=start + "/notes.txt"))
+        self.assertIsNone(bash(f"ls '{start}'"))
+        self.assertFalse(any(guard._inside(guard._real(start), root) for root, _ in guard.protected(HOME, {})))
 
     def test_file_tools_in_the_repo(self):
         self.assertIsNone(decide("Read", file_path=REPO + "/AGENTS.md"))

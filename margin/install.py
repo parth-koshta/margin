@@ -19,7 +19,6 @@ import json
 import os
 import platform
 import plistlib
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,6 +54,12 @@ SMS_HOW = """Bank texts (iPhone; 2 minutes):
   3. Optional, for older texts: Messages in iCloud, on the iPhone and on the Mac.
   No iPhone, or your bank texts don't reach this Mac: margin config set read_sms false
   The next sync checks it (margin sync, then margin doctor)."""
+
+AI_HOW = """Choose the AI that sorts what Margin's rules can't and writes your reviews, in your own Terminal:
+    margin setup-ai
+  It lists the AIs on this Mac (Claude Code, Codex, Gemini CLI, Ollama) and API services (Grok, OpenAI, ...; the
+  key is typed hidden), says where each sends what it's handed, asks one made-up question and checks it can't read
+  your files before saving. Optional: without an AI, Margin's own rules and checks still run."""
 
 STATEMENTS_HOW = """Statement passwords, only the ones that apply. Each goes into a hidden prompt in your own Terminal
 (not into a chat) and is kept in your Keychain:
@@ -135,9 +140,6 @@ def step_mac() -> Step:
     else:
         missing.append("Swift (part of the command line tools)")
     notes = []
-    if not (config.read().get("claude_path") or shutil.which("claude")):
-        notes.append("Claude Code isn't installed: sorting and reviews by Claude stay off until it is "
-                     "(https://claude.com/claude-code). Everything else works.")
     if missing:
         return Step("mac", "you", "todo", "This Mac is missing " + " and ".join(missing),
                     "Run  xcode-select --install  in Terminal, click Install, wait for it to finish, then run "
@@ -256,6 +258,9 @@ def step_schedule(dry: bool, install_schedule: Callable[[], int]) -> Step:
 
 
 def _app_ok(app_path: str) -> bool:
+    from . import macapp
+    if macapp.can_build() and macapp.stale(Path(app_path)):     # the browser stand-in, or older than its source
+        return False
     return os.path.exists(app_path) and _ours(_plist(paths.WEB_PLIST)) and health._loaded(paths.WEB_LABEL)
 
 
@@ -270,7 +275,8 @@ def step_app(dry: bool, app_path: str, install_app: Callable[[], int]) -> Step:
     if rc != 0:
         return Step("app", "margin", "failed", "Couldn't install the Margin app", notes=out)
     return Step("app", "margin", "done", f"Margin app and page service installed: {health.tilde(app_path)}",
-                notes=[line for line in out if not line.startswith("Margin app ready")])
+                notes=[line for line in out if not line.startswith(("Margin app ready", "Building the Margin app",
+                                                                    "It shows Margin in a window"))])
 
 
 def step_gmail() -> Step:
@@ -300,6 +306,17 @@ def step_statements() -> Step:
     text = ("Statement passwords saved: " + ", ".join(have)) if have else "Statement passwords: none saved yet"
     return Step("statements", "you", "optional", text,
                 STATEMENTS_HOW.format(statements=health.tilde(paths.STATEMENTS_DIR)))
+
+
+def step_ai() -> Step:
+    from . import llm
+    settings = config.read()
+    if not settings.get("ai_sort", True) and not settings.get("ai_review", True):
+        return Step("ai", "you", "skipped", "AI off: Margin's own rules and checks run (margin setup-ai turns it on)")
+    why = llm.missing(settings)
+    if not why:
+        return Step("ai", "you", "ok", f"AI for sorting and reviews: {llm.name(settings)}")
+    return Step("ai", "you", "optional", "AI for sorting and reviews: not set up yet", AI_HOW, notes=[why])
 
 
 def step_first_sync(dry: bool, no_sync: bool) -> Step:
@@ -380,6 +397,13 @@ def walk_statements(step: Step, prompts: dict) -> Step:
     return step_statements()
 
 
+def walk_ai(step: Step, prompts: dict) -> Step:
+    print(f"\n· {step.text}\n{step.how}\n")
+    if "ai" in prompts and _yes("Choose one now?", default=True):
+        prompts["ai"]()
+    return step_ai()
+
+
 # --- setup ---------------------------------------------------------------------------------------------------
 def _auto(dry: bool, app_path: str, install_app: Callable[[], int], install_schedule: Callable[[], int]) -> list:
     return [step_command(dry), step_data(dry), step_helpers(dry), step_schedule(dry, install_schedule),
@@ -419,7 +443,7 @@ def setup(a, app_path: str, install_app: Callable[[], int], install_schedule: Ca
     steps = [mac] + (plan if dry else _auto(False, app_path, install_app, install_schedule))
     if interactive:
         _print(steps, header=True)
-    person = [step_gmail(), step_sms(), step_statements()]
+    person = [step_gmail(), step_sms(), step_statements(), step_ai()]
     if interactive:
         walked = []
         for s in person:
@@ -429,6 +453,8 @@ def setup(a, app_path: str, install_app: Callable[[], int], install_schedule: Ca
                 s = walk_sms(s)
             elif s.status == "optional" and s.id == "statements":
                 s = walk_statements(s, secret_prompts)
+            elif s.status == "optional" and s.id == "ai":
+                s = walk_ai(s, secret_prompts)
             walked.append(s)
         person = walked
     steps += person + [step_first_sync(dry, a.no_sync)]
