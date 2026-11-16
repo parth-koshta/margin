@@ -1,0 +1,39 @@
+# Margin keeps all personal data outside this folder (~/Library/Application Support/Margin).
+# These are here in case a copy ever lands in the repo by mistake; the leak guard (margin privacy-check) blocks
+# them too.
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.pdf
+*.csv
+*.eml
+*.mbox
+*.p12
+*.pem
+*.key
+statements/
+settings.json
+rules.json
+server.json
+private-words.txt
+client_secret*.json
+.env
+.env.*
+
+# Images and videos only from `margin demo`, in docs/media/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.heic
+*.mov
+*.mp4
+*.m4v
+*.webm
+!docs/media/**
+
+__pycache__/
+.DS_Store
+.claude/settings.local.json

@@ -1,0 +1,13 @@
+name: checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests (made-up data, temporary data folder)
+        run: /usr/bin/python3 -m unittest discover -s tests -t .
+      - name: Leak guard (general patterns; personal details are checked on the owner's Mac by the git hooks)
+        run: ./margin-cli privacy-check

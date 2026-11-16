@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "demo",
+      "runtimeExecutable": "./margin-cli",
+      "runtimeArgs": ["demo", "--no-open"],
+      "port": 8765,
+      "url": "http://demo.margin.localhost:8765"
+    },
+    {
+      "name": "demo-india",
+      "runtimeExecutable": "./margin-cli",
+      "runtimeArgs": ["demo", "--india", "--no-open", "--port", "8767"],
+      "port": 8767,
+      "url": "http://demo.margin.localhost:8767"
+    }
+  ]
+}

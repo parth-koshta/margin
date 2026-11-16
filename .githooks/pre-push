@@ -1,0 +1,3 @@
+#!/bin/sh
+# Leak guard: check everything being pushed (files, commit messages, author emails) before it leaves this Mac.
+exec "$(git rev-parse --show-toplevel)/margin-cli" privacy-check --push

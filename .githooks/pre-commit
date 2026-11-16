@@ -1,0 +1,3 @@
+#!/bin/sh
+# Leak guard: refuse a commit that contains your personal details (see margin/privacy.py).
+exec "$(git rev-parse --show-toplevel)/margin-cli" privacy-check --staged
