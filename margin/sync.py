@@ -397,6 +397,14 @@ def run(quiet_notify: bool = False) -> int:
     else:
         problems.append(f"SMS: {why} Grant Full Disk Access (see margin doctor) or set read_sms to false in settings.json.")
 
+    progress("Reading downloaded statements", force=True)
+    try:   # bank, card and broker files in the statements folder (imports.py); never breaks the sync
+        from . import imports
+        problems += [f"Statements: {n}" for n in imports.read(conn, settings)]
+        conn.commit()
+    except Exception as e:   # noqa: BLE001
+        problems.append(f"Statements: {e}")
+
     if db.get_state(conn, "parser_version") != str(parse.PARSER_VERSION):
         reparse_parties(conn, settings)
     try:   # Claude sorting must never break the sync

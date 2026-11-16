@@ -1,4 +1,4 @@
-"""Investments: Indian stocks and mutual funds (CDSL CAS), US stocks (INDmoney), NPS.
+"""Investments: Indian stocks and mutual funds (CDSL CAS), US stocks (INDmoney, or broker files), NPS and more.
 
 update() runs in the nightly sync and does everything that needs the network: new statements, new INDmoney orders,
 closing prices, today's values, stop-loss checks and Claude's weekly / monthly analysis. snapshot() only reads the
@@ -112,6 +112,20 @@ def holdings(conn: sqlite3.Connection, settings: dict, online: bool = False) -> 
         cost = float(o["cost"]) if o.get("cost") is not None else None
         add(kind, f"OTHER:{o.get('name', kind)}", o.get("name") or KINDS[kind], 1, value, None,
             o.get("as_of") or today, cur, None, cost, o.get("as_of") or today, {"source": "settings.json"})
+    from . import imports   # noqa: PLC0415
+    for p in imports.broker_positions(conn):    # positions from a broker's file (Fidelity, Schwab, a 401(k)...)
+        units, price, prev, day = p["units"] or 0, p["price"] or 0, None, p["as_of"]
+        px = prices.latest(conn, p["ticker"]) if p["ticker"] else None
+        if px and px[2] >= p["as_of"]:          # a newer close than the file's: shares after any split since
+            for (r,) in conn.execute("SELECT ratio FROM splits WHERE ticker=? AND day>? AND day<=?",
+                                     (p["ticker"], p["as_of"], px[2])):
+                units *= r
+            price, prev, day = px[0], px[1] or _prev_close(conn, p["ticker"], px[2]), px[2]
+        elif not price and units:
+            price = (p["value"] or 0) / units
+        name = f"{p['name']} · {p['account']}" if p["account"] else p["name"]
+        add(p["kind"], p["key"], name, units, price, prev, day, "USD", None, p["cost"], p["as_of"],
+            {"ticker": p["ticker"], "account": p["account"], "source": "file"})
     usd = factor("USD")
     pos, unotes = usstocks.positions(conn, settings, lookup=online)
     notes += unotes
@@ -255,10 +269,11 @@ def update(conn: sqlite3.Connection, settings: dict, progress=None) -> list[str]
     snap = usstocks.history_start(settings)
     if snap:
         since = min(since, date.fromisoformat(snap) - timedelta(days=10))
+    from . import imports   # noqa: PLC0415
     have = conn.execute("SELECT MIN(day) FROM prices WHERE key='^NSEI'").fetchone()[0]
     bench_since = date.today() - timedelta(days=10) if have and have <= str(date.today() - timedelta(days=380)) \
         else date.today() - timedelta(days=400)
-    notes = guard("US prices", prices.tickers, conn, sorted(pos), since, True) or []
+    notes = guard("US prices", prices.tickers, conn, sorted(set(pos) | set(imports.tickers(conn))), since, True) or []
     notes += guard("benchmarks", prices.tickers, conn, list(prices.BENCHMARKS), bench_since) or []
     problems += [f"Investments, prices: {n}" for n in notes]
     conn.commit()

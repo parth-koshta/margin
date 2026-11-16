@@ -24,10 +24,16 @@ def _num(s: str) -> float | None:
 
 
 def import_holdings(conn: sqlite3.Connection) -> list[str]:
-    """Re-read every CSV in statements/. Returns notes about files that couldn't be read."""
+    """Re-read every CSV in statements/ as fixed values (a name and a current-value column). Bank and card
+    downloads and broker positions files are read by imports.py instead (priced each night), so they're skipped
+    here and never counted twice. Returns notes about files that couldn't be read."""
+    from . import imports, money   # noqa: PLC0415
     notes = []
+    home = money.configured()
     conn.execute("DELETE FROM holdings")
     for f in sorted(paths.STATEMENTS_DIR.glob("*.csv")):
+        if imports.classify(f, home):
+            continue
         text = f.read_text(errors="replace")
         rows = list(csv.reader(io.StringIO(text)))
         hdr_i = next((i for i, r in enumerate(rows[:30])
