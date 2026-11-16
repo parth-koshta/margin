@@ -248,7 +248,7 @@ details[open]>summary{margin-bottom:12px}
 .lrow small{display:block;font-size:12px;color:var(--muted)}
 .lrow.acct{grid-template-columns:1fr auto}
 
-/* Insight (Claude's take) */
+/* Insight (the AI's take) */
 .spark{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);flex:none}
 .spark svg.i{width:15px;height:15px}
 .rv-head{font:600 21px/1.3 var(--display);letter-spacing:-.02em;margin:0 0 4px}
@@ -494,7 +494,7 @@ table.plain td.num{text-align:right}
   </section>
   <section class="cols">
     <div class="panel"><div class="ph"><h3 id="nw-title">Accounts</h3><span class="ph-meta" id="nw-meta"></span></div><div id="nwparts"></div></div>
-    <div class="panel"><div class="ph"><h3><span class="spark"><svg class="i" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg></span>Claude’s take</h3><button class="link" data-goto="invest">Investments<svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div><div id="home-take"></div></div>
+    <div class="panel"><div class="ph"><h3><span class="spark"><svg class="i" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg></span>The AI’s take</h3><button class="link" data-goto="invest">Investments<svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div><div id="home-take"></div></div>
   </section>
 </div>
 
@@ -517,7 +517,7 @@ table.plain td.num{text-align:right}
     <p class="hint">Price alerts: each night Margin checks the closing price and sends a Mac notification when a holding closes at or below your level. Nothing is ever sold.</p>
   </div>
   <section class="cols c75">
-    <div class="panel"><div class="ph"><h3><span class="spark"><svg class="i" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/></svg></span>Claude’s analysis</h3>
+    <div class="panel"><div class="ph"><h3><span class="spark"><svg class="i" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/></svg></span>The AI’s analysis</h3>
       <span class="pagetools"><span class="seg" id="inv-rkind" role="group" aria-label="Analysis"><button data-k="weekly" aria-pressed="true">Weekly</button><button data-k="monthly" aria-pressed="false">Monthly</button></span><button class="btn live-only" id="inv-run" hidden>Analyse now</button></span></div>
       <div id="inv-review"></div></div>
     <div class="panel"><div class="ph"><h3>Markets</h3><span class="ph-meta">1 month · 1 year</span></div><div id="inv-bench"></div></div>
@@ -573,7 +573,7 @@ table.plain td.num{text-align:right}
     <div class="progress"><span class="fill" id="so-fill"></span></div>
     <p class="sub" id="so-meter-text"></p></div></section>
   <div class="panel" id="ai-card">
-    <div class="ph"><h3><span class="spark"><svg class="i" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/></svg></span>Sorted by Claude</h3><button class="btn primary" id="ai-run">Ask Claude to sort now</button></div>
+    <div class="ph"><h3><span class="spark"><svg class="i" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/></svg></span>Sorted by AI</h3><button class="btn primary" id="ai-run">Ask AI to sort now</button></div>
     <p class="status" id="ai-status"></p>
     <div id="ai-list" style="margin-top:6px"></div>
   </div>
@@ -593,7 +593,7 @@ table.plain td.num{text-align:right}
   </div>
   <div class="panel" id="so-unread-card" style="margin-top:28px" hidden>
     <details><summary id="so-unread-title">Bank alerts Margin couldn't read</summary>
-      <p class="status" style="margin-bottom:10px">From your banks, but no amount could be found, so they aren't counted. If these are real payments, tell Claude which format so the reader can learn it.</p>
+      <p class="status" style="margin-bottom:10px">From your banks, but no amount could be found, so they aren't counted. If these are real payments, ask your coding agent to teach the reader this format.</p>
       <table class="plain"><thead><tr><th>Date</th><th>From</th><th>Text</th></tr></thead><tbody id="so-unread"></tbody></table>
     </details>
   </div>
@@ -993,10 +993,10 @@ function kindTiles(el){
 }
 
 function takeHtml(r, short){
-  if(!r) return `<p class="empty">Claude writes a short analysis every Monday for the week before, and a fuller one when your monthly statement arrives. It describes and measures; it doesn’t tell you what to buy or sell.</p>`;
+  if(!r) return `<p class="empty">The AI writes a short analysis every Monday for the week before, and a fuller one when your monthly statement arrives. It describes and measures; it doesn’t tell you what to buy or sell.</p>`;
   const bul=short?r.summary.slice(0,3):r.summary, watch=short?r.watch.slice(0,1):r.watch;
   return `<div class="rv-head">${esc(r.headline)}</div>
-    <div class="rv-meta">${esc(r.label)} · ${r.by_ai?'by Claude on this Mac':'automatic summary'+(r.note?' ('+esc(r.note)+')':'')}${short?'':' · '+new Date(r.created).toLocaleString(LOC,{dateStyle:'medium',timeStyle:'short'})}</div>
+    <div class="rv-meta">${esc(r.label)} · ${r.by_ai?'by AI':'automatic summary'+(r.note?' ('+esc(r.note)+')':'')}${short?'':' · '+new Date(r.created).toLocaleString(LOC,{dateStyle:'medium',timeStyle:'short'})}</div>
     <ul class="bul">${bul.map(b=>`<li>${esc(b)}</li>`).join('')}</ul>
     ${watch.map(w=>`<div class="watch"><b>${esc(w.title)}</b>${esc(w.why)}</div>`).join('')}
     <p class="fine">A description of your numbers, not financial advice. The decisions are yours.</p>`;
@@ -1249,8 +1249,10 @@ if(LIVE){
 
   // ---------- Sort out ----------
   const SPARK_I='<svg class="i" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/></svg>';
-  // why a category is suggested (suggest.py says where it came from)
-  const sugWhy=s=>s.src==='claude'?`Claude’s guess${s.reason?': '+s.reason:''}`:s.src==='similar'?`Like ${disp(s.like)}, which you sorted`
+  // the AI the person chose (llm.py): "Claude", "Codex", "Grok", "LM Studio"…; "AI" in the demo. AIC starts a sentence.
+  const AI=()=>(S&&S.ai&&S.ai.name)||'AI', AIC=()=>{ const n=AI(); return n.charAt(0).toUpperCase()+n.slice(1); };
+  // why a category is suggested (suggest.py says where it came from; 'claude' is the id the AI's guesses have always had)
+  const sugWhy=s=>s.src==='claude'?`${AIC()}’s guess${s.reason?': '+s.reason:''}`:s.src==='similar'?`Like ${disp(s.like)}, which you sorted`
     :s.src==='name'?`The name says “${s.word}”`:s.src==='monthly'?'About the same amount every month'
     :s.src==='person'?'Looks like a person':'One you use often';
   const expanded=new Set();
@@ -1304,7 +1306,7 @@ if(LIVE){
       act('/api/senders',{keys,action:'ignore'},`${keys.length} senders hidden (still not counted)`,()=>api('/api/senders',{keys,action:'unignore'}).then(apply))
         .then(()=>{ hideAll.disabled=false; }); };
     $('so-senders').innerHTML=S.senders.length?S.senders.map((s,i)=>`<div class="sorow" data-i="${i}"><span class="av">${esc(initials(s.key))}</span>
-      <div class="main"><b>${esc(s.key)}</b><div class="meta">${s.n} message${s.n==1?'':'s'} · ${s.pay} with an amount</div>${S.sorting.bank_hints[s.key]?`<div class="ai-hint">Claude: may be a bank. ${esc(S.sorting.bank_hints[s.key])}</div>`:''}<div class="example">“${esc(s.example)}”</div></div>
+      <div class="main"><b>${esc(s.key)}</b><div class="meta">${s.n} message${s.n==1?'':'s'} · ${s.pay} with an amount</div>${S.sorting.bank_hints[s.key]?`<div class="ai-hint">${esc(AIC())}: may be a bank. ${esc(S.sorting.bank_hints[s.key])}</div>`:''}<div class="example">“${esc(s.example)}”</div></div>
       <div class="right acts"><button class="btn" data-a="ignore">Hide</button><button class="btn" data-a="trust">It's my bank</button></div></div>`).join('')
       :`<p class="empty">Nothing to decide.</p>`;
     $('so-senders').querySelectorAll('button').forEach(b=>b.onclick=()=>{ const s=S.senders[+b.closest('.sorow').dataset.i], a=b.dataset.a;
@@ -1329,23 +1331,24 @@ if(LIVE){
       el.innerHTML=`<details><summary>${S.ignored.length} senders · show</summary><div class="chips">${inner}</div></details>`;
       el.querySelectorAll('button').forEach(b=>b.onclick=()=>act('/api/sender',{key:b.dataset.k,action:'unignore'})); }
   }
-  // ---------- Claude sorting ----------
+  // ---------- AI sorting ----------
   const AIJOBS=[['audit','Mistakes fixed'],['unread','Payments read from alerts Margin couldn’t read'],
     ['doubles','Counted once (the same payment was reported twice)'],['payees','Payees found in the message'],['splits','Split bills (friends’ shares reduce the bill)'],['merged','Counted twice again (were two different payments)'],
     ['categories','Categories picked'],['senders','Senders hidden (not a bank)']];
   let aiPoll=null;
   function aiSort(){ const so=S.sorting, st=$('ai-status'), btn=$('ai-run');
-    btn.hidden=!so.on||!S.ai.found; btn.disabled=so.running; btn.textContent=so.running?'Claude is sorting…':'Ask Claude to sort now';
+    btn.hidden=!so.on||!S.ai.found; btn.disabled=so.running; btn.textContent=so.running?'AI is sorting…':'Ask AI to sort now';
     const when=so.last?dtime(so.last.at.replace('T',' ')):'';
-    st.innerHTML=!so.on?'Claude sorting is off. To turn it on, set <code>"ai_sort": true</code> in settings.json.'
-      :!S.ai.found?'Claude Code isn’t installed where Margin can find it.'
-      :so.running?'Claude is checking your senders, unread alerts, double counts, categories and every transaction against its message. The first full check takes a while; you can keep using Margin.'
-      :(so.last?`Claude sorts what rules can’t at every nightly sync. Last run ${esc(when)}: ${so.last.applied?`${so.last.applied} change${so.last.applied===1?'':'s'}`:'nothing new to change'}${(()=>{ const t=so.decisions.filter(d=>d.applied&&!d.undone).length; return t?` (${t} so far)`:''; })()}. What it wasn’t sure about is left for you below. Undo anything it got wrong and it won’t do it again.`
+    const who=esc(AIC()), here=S.ai.local?', on this Mac':'';
+    st.innerHTML=!so.on?'AI sorting is off. To turn it on, run <code>margin setup-ai</code> (or set <code>"ai_sort": true</code> in settings.json).'
+      :!S.ai.found?(why=>esc(why)+(/setup-ai/.test(why)?'':' Choose or fix it with <code>margin setup-ai</code>.'))(S.ai.why||`${AIC()} isn’t set up yet.`)
+      :so.running?`${who} is checking your senders, unread alerts, double counts, categories and every transaction against its message. The first full check takes a while; you can keep using Margin.`
+      :(so.last?`${who} sorts what rules can’t at every nightly sync${here}. Last run ${esc(when)}: ${so.last.applied?`${so.last.applied} change${so.last.applied===1?'':'s'}`:'nothing new to change'}${(()=>{ const t=so.decisions.filter(d=>d.applied&&!d.undone).length; return t?` (${t} so far)`:''; })()}. What it wasn’t sure about is left for you below. Undo anything it got wrong and it won’t do it again.`
         +(so.last.notes.length?`<br><span class="warn">${so.last.notes.map(esc).join(' · ')}</span>`:'')
-        :'Claude sorts what rules can’t at every nightly sync: hides shops and ads, reads alerts Margin couldn’t, counts double-reported payments once and picks categories. Undo anything it gets wrong.');
+        :`${who} sorts what rules can’t at every nightly sync${here}: hides shops and ads, reads alerts Margin couldn’t, counts double-reported payments once and picks categories. Undo anything it gets wrong.`);
     const L=so.decisions.filter(d=>d.applied), SG=so.decisions.filter(d=>d.verdict==='suggest');
-    $('ai-list').innerHTML=(SG.length?`<details class="ai-group" open><summary><b>Claude suggests changing your own choices</b> · ${SG.length}</summary>
-        <p class="hint">You set these yourself, so Claude didn’t change them.</p>
+    $('ai-list').innerHTML=(SG.length?`<details class="ai-group" open><summary><b>The AI suggests changing your own choices</b> · ${SG.length}</summary>
+        <p class="hint">You set these yourself, so the AI didn’t change them.</p>
         <table class="ai-t"><tbody>${SG.map(d=>`<tr><td>${esc(d.label||'')}</td><td class="ex">${esc(d.reason||'')}</td>
           <td class="num"><div class="acts"><button class="btn" data-acc="${d.id}">Apply</button><button class="btn" data-dis="${d.id}">Keep mine</button></div></td></tr>`).join('')}</tbody></table></details>`:'')
       +AIJOBS.map(([job,title])=>{ const rows=L.filter(d=>d.job===job); if(!rows.length) return '';
@@ -1355,9 +1358,9 @@ if(LIVE){
           <td class="num">${d.undone?'<span class="status">Undone</span>':`<button class="btn" data-ai="${d.id}">Undo</button>`}</td></tr>`).join('')}</tbody></table></details>`; }).join('');
     $('ai-list').querySelectorAll('[data-acc]').forEach(b=>b.onclick=()=>{ b.disabled=true; act('/api/ai/accept',{id:+b.dataset.acc},'Changed'); });
     $('ai-list').querySelectorAll('[data-dis]').forEach(b=>b.onclick=()=>{ b.disabled=true; act('/api/ai/dismiss',{id:+b.dataset.dis},'Kept yours'); });
-    $('ai-list').querySelectorAll('[data-ai]').forEach(b=>b.onclick=()=>{ b.disabled=true; act('/api/ai/undo',{id:+b.dataset.ai},'Undone. Claude won’t make that change again.'); });
+    $('ai-list').querySelectorAll('[data-ai]').forEach(b=>b.onclick=()=>{ b.disabled=true; act('/api/ai/undo',{id:+b.dataset.ai},'Undone. The AI won’t make that change again.'); });
     clearInterval(aiPoll); aiPoll=null;
-    if(so.running) aiPoll=setInterval(async()=>{ try{ const st2=await api('/api/state'); if(!st2.sorting.running){ apply(st2); toast(`Claude finished: ${st2.sorting.last?st2.sorting.last.applied:0} changes`); } }catch(e){} },5000);
+    if(so.running) aiPoll=setInterval(async()=>{ try{ const st2=await api('/api/state'); if(!st2.sorting.running){ apply(st2); toast(`${AIC()} finished: ${st2.sorting.last?st2.sorting.last.applied:0} changes`); } }catch(e){} },5000);
   }
   $('ai-run').onclick=()=>{ $('ai-run').disabled=true; act('/api/ai/run',{},null); };
 
@@ -1376,7 +1379,9 @@ if(LIVE){
     act('/api/flag',{key:k,state:b.dataset.s},b.dataset.s==='fine'?'Marked as fine':null,b.dataset.s==='fine'?()=>api('/api/flag',{key:k,state:'open'}).then(apply):null); }); }
   function reviews(){
     const ai=S.ai;
-    $('rv-ai').innerHTML=!ai.on?'AI reviews are off (automatic checks only).':!ai.found?'Claude Code not found: reviews use the automatic checks only.':'Written by Claude on this Mac after the midnight sync · nothing saved to your Claude history';
+    $('rv-ai').innerHTML=!ai.on?'AI reviews are off (automatic checks only).'
+      :!ai.found?`${esc(AIC())} isn’t set up, so reviews use the automatic checks only (<code>margin setup-ai</code>).`
+      :`Written by ${esc(AI())} after the midnight sync${ai.local?', on this Mac: nothing leaves it':''}`;
     const seen=new Set(), open=[];
     for(const r of S.reviews) for(const f of r.flags) if(!f.fine&&f.severity!=='low'&&!seen.has(f.key)){ seen.add(f.key); open.push(f); }
     $('rv-h1').textContent=open.length?`${open.length} thing${open.length>1?'s':''} to check`:'All clear';
@@ -1391,7 +1396,7 @@ if(LIVE){
     const r=mine.find(x=>x.id===rvPick);
     if(!r){ $('rv-body').innerHTML=`<p class="empty">The first ${rvKind} review is written after the next midnight sync${rvKind==='weekly'?' on a Monday':rvKind==='monthly'?' on the 1st':''}. Or press “Review … now”.</p>`; return; }
     $('rv-body').innerHTML=`<div class="rv-head">${esc(r.headline)}</div>
-      <div class="rv-meta">${esc(r.label)} · ${r.by_ai?'by Claude':'automatic checks only'+(r.note?' ('+esc(r.note)+')':'')} · written ${new Date(r.created).toLocaleString(LOC,{dateStyle:'medium',timeStyle:'short'})}</div>
+      <div class="rv-meta">${esc(r.label)} · ${r.by_ai?'by AI':'automatic checks only'+(r.note?' ('+esc(r.note)+')':'')} · written ${new Date(r.created).toLocaleString(LOC,{dateStyle:'medium',timeStyle:'short'})}</div>
       <ul class="bul">${r.summary.map(b=>`<li>${esc(b)}</li>`).join('')}</ul>
       ${r.flags.length?`<div class="rv-flags"><h4>Flagged in this review · ${r.flags.length}</h4>${r.flags.map(flagHtml).join('')}</div>`:'<p class="hint">Nothing flagged in this period.</p>'}`;
     bindFlags($('rv-body'));

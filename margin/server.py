@@ -177,7 +177,8 @@ def _state(conn) -> dict:
         "reviews": review.listing(conn),
         "open_flags": len(review.open_flags(conn)),
         "ai": {"on": bool(settings.get("ai_review", True)), "found": llm.ready(settings),
-               "name": llm.name(settings), "local": llm.is_local(settings)},   # e.g. "Codex"; local: on this Mac
+               "name": llm.name(settings), "local": llm.is_local(settings),    # e.g. "Codex"; local: on this Mac
+               "why": llm.missing(settings)},                                   # why it isn't set up ('' if it is)
         "sorting": {"on": bool(settings.get("ai_sort", True)), "running": _SORTING.locked(),
                     "last": json.loads(db.get_state(conn, "ai_last") or "null"),
                     "decisions": ai.listing(conn), "bank_hints": ai.bank_hints(conn)},
