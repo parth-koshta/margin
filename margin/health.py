@@ -13,13 +13,14 @@ import re
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from . import config, paths
 
 SECRETS = {"pan": "margin setup-pan", "pran": "margin setup-pran", "ppf_statement": "margin setup-ppf"}
-AREAS = {"Gmail", "SMS", "AI sorting", "Claude sorting", "Investments", "Statements", "Review"}   # sync problems
+AREAS = {"Gmail", "SMS", "Text backups", "AI sorting", "Claude sorting", "Investments", "Statements",
+         "Review"}   # sync problems
 
 
 def python() -> str:
@@ -83,13 +84,52 @@ def _git(*args: str) -> str | None:
 def check_sms(settings: dict, last_sms: str | None) -> dict:
     from . import sms
     if settings.get("read_sms") is False:
-        return {"id": "sms", "ok": True, "text": "Bank SMS off (read_sms is false in settings.json)", "state": "off"}
+        return {"id": "sms", "ok": True, "state": "off",
+                "text": "Texts from Messages (iPhone) off: read_sms is false in settings.json"}
     if last_sms == "ok" or sms.available()[0]:
         return {"id": "sms", "ok": True, "text": "Bank SMS readable by the sync job", "state": "ok"}
     return {"id": "sms", "ok": False, "state": "no_access",
             "text": "Bank SMS: the sync job couldn't read Messages yet. Give Full Disk Access to "
                     f"{tilde(python())} (System Settings > Privacy & Security > Full Disk Access), then run margin sync.",
             "fix": f"the person gives Full Disk Access to {tilde(python())}, or: margin config set read_sms false"}
+
+
+BACKUP_DAYS = 3   # an Android text backup older than this means the phone's schedule stopped
+
+
+def check_texts_backup(settings: dict, seen: dict | None) -> dict | None:
+    """Android texts (SMS Backup & Restore files, smsbackup.py), judged by what the last sync saw (the sync job may
+    open folders this Terminal can't). None when there are none and no folder is set."""
+    from . import smsbackup
+    seen = seen or {}
+    state, files, newest = seen.get("state"), seen.get("files") or 0, seen.get("newest")
+    if smsbackup.folder(settings) is None and state in (None, "off"):
+        return None
+    out = {"id": "texts_backup", "ok": False, "state": state or "pending"}
+    fda = (f"Give Full Disk Access to {tilde(python())} (System Settings > Privacy & Security > Full Disk Access), "
+           "then run margin sync.")
+    if state in (None, "off"):                        # set after the last sync
+        return {**out, "ok": True, "state": "pending", "text": "Android text backups: set up; the next sync reads them"}
+    if state == "no_access":
+        return {**out, "text": "Android text backups: the sync job couldn't open the backup folder. " + fda,
+                "fix": f"the person gives Full Disk Access to {tilde(python())}"}
+    if state == "missing":
+        return {**out, "text": "Android text backups: the folder in sms_backup_folder isn't on this Mac (is the "
+                               "drive's app running, with that folder kept on this Mac?)",
+                "fix": "the person checks the drive's app, or: margin config set sms_backup_folder <the folder>"}
+    if state == "none" or not files:
+        return {**out, "text": "Android text backups: no backup of texts there yet. Run a backup in SMS Backup & "
+                               "Restore (messages, to that drive), then margin sync.",
+                "fix": "the person runs a backup on the phone"}
+    age = (date.today() - date.fromisoformat(newest)).days if newest else None
+    text = f"Android text backups: {files} file{'s' if files != 1 else ''}, newest from {newest}"
+    if state == "unreadable":
+        return {**out, "text": text + "; one couldn't be read (see the last sync's problems)",
+                "fix": "the person runs margin sync in their Terminal to see which file and why"}
+    if age is not None and age > BACKUP_DAYS:
+        return {**out, "text": text + f": {age} days old. Check the backup schedule in SMS Backup & Restore.",
+                "fix": "the person checks the app's scheduled backup on the phone"}
+    return {**out, "ok": True, "text": text}
 
 
 def last_sync() -> dict | None:
@@ -144,6 +184,9 @@ def checks() -> list[dict]:
     last = _state(conn, "last_sync") if conn else None
     last_sms = (last or {}).get("sms")       # Terminal has other permissions: judge by what the sync job saw
     out.append(check_sms(settings, last_sms))
+    backups = check_texts_backup(settings, (last or {}).get("texts_backup"))
+    if backups:
+        out.append(backups)
     scheduled = _loaded(paths.LAUNCHD_LABEL)
     add("schedule", scheduled, "Nightly 00:00 sync scheduled" if scheduled else
         "Nightly sync not scheduled: margin schedule install", **({} if scheduled else {"fix": "margin setup"}))

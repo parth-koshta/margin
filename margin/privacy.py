@@ -34,7 +34,8 @@ from . import paths
 ALLOW_MARK = "privacy: ok"
 NEVER_FILES = re.compile(r"(^|/)(statements/|.*\.pdf$|.*\.db$|.*\.db-\w+$|.*\.sqlite3?$|money\.db|settings\.json$|"
                          r"rules\.json$|server\.key$|server\.json$|client_secret.*\.json$|.*\.p12$|.*\.pem$|"
-                         r".*\.mbox$|.*\.eml$|chat\.db|assets\.csv$|private-words\.txt$)", re.I)
+                         r".*\.mbox$|.*\.eml$|chat\.db|sms-[^/]*\.xml$|.*\.xml\.zip$|assets\.csv$|"
+                         r"private-words\.txt$)", re.I)
 MEDIA = re.compile(r"\.(png|jpe?g|gif|webp|heic|mov|mp4|m4v|webm)$", re.I)
 CLAUDE_SETTINGS = ".claude/settings.json"   # Claude Code's project settings (the data guard hook): code, not data
 # Its allowed top-level keys: Claude Code's own settings. Margin's settings.json (currency, self_names, ...) copied

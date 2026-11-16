@@ -12,7 +12,7 @@ Read [AGENTS.md](../../../AGENTS.md) first, the Rules and Setup sections. The sh
   any browser tool, and don't repeat back names or numbers they tell you. You learn the state from
   `margin doctor --json` and `margin setup --json`: statuses and counts only.
 - **Secrets only in hidden prompts in their own Terminal.** Never ask for a PAN, PRAN, password or token in chat.
-- **Their steps are theirs:** the Google sign-in, Full Disk Access, iPhone settings, Touch ID, passwords. Tell
+- **Their steps are theirs:** the Google sign-in, Full Disk Access, phone settings, Touch ID, passwords. Tell
   them exactly what to click; then check.
 - **Ask before changing their Mac.** `margin setup` changes nothing without `--yes`, and you pass `--yes` only
   after the person said yes to the list of changes.
@@ -53,9 +53,17 @@ Until step 1 is done, `margin` means `./margin-cli` in the repository folder.
    delete it.
    Check: `margin doctor --json` has `gmail` and `gmail_token` ok.
 
-6. **Bank texts** (the `sms` step's `how`; skip if they set `read_sms` to false). Give them the iPhone and Full
-   Disk Access steps with the Python path from `python_for_full_disk_access` in `margin doctor --json`. This
-   is checked by the first sync, not now.
+6. **Bank texts** (the `sms` step's `how`; AGENTS.md step 4). Ask which phone they have.
+   - iPhone: give them the Text Message Forwarding and Full Disk Access steps, with the Python path from
+     `python_for_full_disk_access` in `margin doctor --json`.
+   - Android: tell them first that the backup app puts all their texts in their own drive (Google Drive, Dropbox
+     or OneDrive) and Margin reads only the bank texts from it. If they want it, walk them through SMS Backup &
+     Restore and the drive's Mac app; then either they run `margin setup` in their Terminal and drag the folder
+     in, or they tell you the folder and you run `margin config set read_sms false` and
+     `margin config set sms_backup_folder "<that folder>"`. Never list, open or search the folder or a backup
+     file to find or check it: it holds every text on their phone.
+   - Neither: `margin config set read_sms false`.
+   This is checked by the first sync, not now.
 
 7. **Statement passwords** (the `statements` step; only what applies; India only). Ask them to open their own
    Terminal window (not this chat, not with `!`) and run `margin setup-pan`, `margin setup-pran` or
@@ -76,7 +84,8 @@ Until step 1 is done, `margin` means `./margin-cli` in the repository folder.
 10. **Verify** (AGENTS.md "Verify"):
    - `margin setup --json`: `would_change`, `waiting_on_you` and `failed` empty.
    - `margin doctor --json` after the first sync: every check ok (the `sms` check passes once a sync has read
-     texts); `counts.transactions` above 0.
+     texts; on Android, `texts_backup` names how many backups and the newest one's date); `counts.transactions`
+     above 0.
    - Tell them to open **Margin** from Spotlight once in each browser they use and bookmark
      http://margin.localhost/ (Touch ID asks). You don't open it.
 

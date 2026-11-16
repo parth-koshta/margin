@@ -1,8 +1,9 @@
 # Margin
 
 **Your money, on your Mac.** Margin shows where your money comes from and where it goes, what your investments are
-doing, and your net worth. It reads your bank and card alerts (Gmail and the text messages your iPhone forwards to
-your Mac), your investment statements, and anything you add by hand, then syncs every night at 00:00 by itself.
+doing, and your net worth. It reads your bank and card alerts (Gmail, and the bank texts your iPhone forwards to
+your Mac or your Android phone backs up), your investment statements, and anything you add by hand, then syncs
+every night at 00:00 by itself.
 Everything is stored and shown on your Mac only, in the Margin app's own window (or at <http://margin.localhost/>
 in a browser), behind Touch ID.
 
@@ -62,7 +63,8 @@ Set up Margin on this Mac for me with the margin-setup skill. Do every step you 
 Claude shows you what `margin setup` will add to your Mac (the `margin` command, a line in `~/.zshrc`, your
 private data folder, two LaunchAgents and the Margin app) and goes ahead only when you say yes. It asks you a few
 questions (your currency, your name as banks print it) and walks you through the steps only you can do: signing
-in to Google, turning on text forwarding and Full Disk Access, typing statement passwords into hidden prompts in
+in to Google, turning on text forwarding (iPhone) or a daily text backup (Android) and Full Disk Access, typing
+statement passwords into hidden prompts in
 your own Terminal, and choosing the AI, if you want one (`margin setup-ai`). Later, "update Margin" uses the `margin-update` skill, and "Margin doesn't count my bank"
 the `margin-add-bank` skill.
 
@@ -85,6 +87,23 @@ It shows what it will add (the `margin` command, your private data folder, the n
 asks, does it, then walks you through the rest, waiting while you do each one. Run it again any time: it only does what's missing.
 [AGENTS.md](AGENTS.md#setup) has every step in detail. Change settings with `margin config set`, for example
 `margin config set currency USD`.
+
+### Bank texts: iPhone or Android
+
+Some alerts come only by text (many UPI payments in India, for one), so Margin reads bank texts too.
+
+- **iPhone**: Text Message Forwarding passes each text to your Mac's Messages app as it arrives, and the nightly
+  sync reads them there. That needs Full Disk Access for the Python the sync runs; `margin setup` shows you how.
+- **Android** has no way to pass texts to a Mac, so they come as a backup file, up to a day late. On the phone,
+  the [SMS Backup & Restore](https://www.synctech.com.au/sms-backup-restore/) app backs up your messages every day
+  to Google Drive, Dropbox or OneDrive (messages only, no backup password). That drive's Mac app keeps the folder
+  on your Mac, and `margin setup` asks you which folder it is (or: `margin config set read_sms false`, then
+  `margin config set sms_backup_folder "<the folder>"`). A backup dropped into the statements folder by hand is
+  read too. If the sync says it can't open the folder, give it Full Disk Access as for an iPhone.
+  The backup holds all your texts and lives in your drive, under that company's terms. Margin only reads it: bank
+  texts only, never texts from people, MMS or calls, and nothing else from the file is kept.
+- **Neither**: `margin config set read_sms false`. Email alerts and statements work the same; turn on email
+  alerts in each bank's app.
 
 ### Keep it up to date
 
@@ -146,7 +165,8 @@ Every AI gets exactly the same thing, built by Margin for each request:
 - **Investment analysis**: your holdings' names, values, weights and returns, totals by type, benchmarks,
   stop-loss levels and statement dates.
 
-It never gets your mailbox, your Messages, your statements, the database or your Keychain, and it can't look for
+It never gets your mailbox, your Messages or text backups, your statements, the database or your Keychain, and it
+can't look for
 them: its tools are off. Where it goes is in the table above: with Ollama and a local model nothing leaves your
 Mac; otherwise that company processes it under your plan's terms. Some free plans let the company keep what you send
 and use it to improve its models, so check your plan's data settings first. Turn the AI off with
@@ -182,6 +202,9 @@ and use it to improve its models, so check your plan's data settings first. Turn
 - **Prices**: Indian stocks and funds come from whole-market files (NSE/BSE closes, AMFI NAVs), fetched only
   while you hold some, so nothing about your holdings is sent. US prices come from Yahoo Finance, which is sent
   only the tickers you hold.
+- **Bank texts** are read on your Mac: from an iPhone, in the Messages app's database; from Android, in the backup
+  file your drive's app keeps on your Mac (the backup app put it in your drive; Margin only reads it). Only texts
+  from banks' sender IDs and short codes are read, never texts from people.
 - **Downloaded statements** (bank, card and broker files you put in the statements folder) are read on your
   Mac. No Plaid, no aggregator, no bank login: Margin never connects to your bank.
   Exchange rates are the ECB's (frankfurter.dev): only currency codes and dates are sent.
@@ -194,7 +217,8 @@ and use it to improve its models, so check your plan's data settings first. Turn
 - **Claude Code in this folder works without your data.** Claude uses `margin` commands that print statuses
   and counts only (`margin doctor --json`, `margin config get`), and a hook in `.claude/settings.json` (the data
   guard, `.claude/hooks/data_guard.py`) checks every tool call it makes here. It refuses anything that would
-  read your data folder or its backups, your Messages database, Margin's Keychain secrets or your page at
+  read your data folder or its backups, your Messages database, your Android text backups, Margin's Keychain
+  secrets or your page at
   <http://margin.localhost/>, and asks you before anything changes the guard or Claude Code's settings. **It's
   an accident guard, not a sandbox**: it reads each call before it runs and can't see what a program does
   afterwards. The [AGENTS.md](AGENTS.md) rules it backs up still apply, and it doesn't stop anyone set on
@@ -261,7 +285,8 @@ the original.
   card statements (what's owed and when it's due). Turn on the alerts you want in each bank's app; "every
   transaction" alerts give the most complete picture.
 - **Bank texts** from US banks' short codes (Chase's 24273, Wells Fargo's 93557, and any short code whose text
-  starts with a US bank's name) are read like emails. Texts from people's phone numbers are never read.
+  starts with a US bank's name) are read like emails, from an iPhone or an Android phone (see
+  [Bank texts](#bank-texts-iphone-or-android)). Texts from people's phone numbers are never read.
 - **Downloaded statements**: drop the CSV or QFX/OFX files your banks and card issuers let you download into
   `~/Library/Application Support/Margin/statements/`. Every payment in them is counted once, even when an alert
   already reported it (same amount and card, within a few days) or two downloads overlap, and their balances

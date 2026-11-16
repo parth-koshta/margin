@@ -19,6 +19,7 @@ import json
 import os
 import platform
 import plistlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -46,13 +47,28 @@ GMAIL_HOW = """Connect Gmail, read-only (about 10 minutes in your browser, signe
   8. Delete the downloaded client_secret file: its contents are in your Keychain now.
   Stuck? Publish greyed out: step 4 isn't finished. "Access blocked": step 5 was skipped."""
 
-SMS_HOW = """Bank texts (iPhone; 2 minutes):
+ANDROID_HOW = """1. Phone: install SMS Backup & Restore (by SyncTech) from the Play Store and set up a backup:
+   messages only (not calls), to Google Drive, Dropbox or OneDrive, no password, scheduled daily.
+2. Mac: that drive's app (Google Drive for desktop, Dropbox or OneDrive), with the backup folder kept on this Mac
+   (available offline).
+3. Tell Margin the folder: margin setup asks for it, or
+     margin config set read_sms false
+     margin config set sms_backup_folder "<the folder>"
+   (Or drop a backup file into the statements folder by hand.)
+4. If the next sync can't open the folder: System Settings > Privacy & Security > Full Disk Access > + >
+   Cmd-Shift-G, paste the Python above > Open > switch it on.
+Margin reads bank texts only, never texts from people. The backup itself stays in your own drive."""
+
+SMS_HOW = """Bank texts (2 minutes on an iPhone, 10 on Android):
+  iPhone:
   1. iPhone: Settings > Apps > Messages > Text Message Forwarding > turn on this Mac.
   2. Mac: System Settings > Privacy & Security > Full Disk Access > + > press Cmd-Shift-G, paste
        {python}
      > Open > switch it on. (Only that Python gets it, so the nightly sync can read your Messages.)
   3. Optional, for older texts: Messages in iCloud, on the iPhone and on the Mac.
-  No iPhone, or your bank texts don't reach this Mac: margin config set read_sms false
+  Android (texts reach this Mac as a backup file, so up to a day late):
+""" + "\n".join("  " + line for line in ANDROID_HOW.splitlines()) + """
+  Neither, or you'd rather not: margin config set read_sms false
   The next sync checks it (margin sync, then margin doctor)."""
 
 AI_HOW = """Choose the AI that sorts what Margin's rules can't and writes your reviews, in your own Terminal:
@@ -288,6 +304,13 @@ def step_gmail() -> Step:
 
 def step_sms() -> Step:
     settings = config.read()
+    backups = health.check_texts_backup(settings, (health.last_sync() or {}).get("texts_backup"))
+    if backups and backups["ok"]:
+        return Step("sms", "you", "ok", backups["text"])
+    if backups:
+        return Step("sms", "you", "todo", backups["text"],
+                    "Bank texts from Android:\n" + ANDROID_HOW.replace("the Python above",
+                                                                        health.tilde(health.python())))
     if settings.get("read_sms") is False:
         return Step("sms", "you", "skipped", "Bank texts off (read_sms is false)")
     if health.check_sms(settings, (health.last_sync() or {}).get("sms"))["ok"]:
@@ -379,11 +402,34 @@ def walk_gmail(step: Step) -> Step:
 
 def walk_sms(step: Step) -> Step:
     print(f"\n→ {step.text}\n{step.how}\n")
-    a = _ask("Press Return when you've done both, or type n if your bank texts don't reach this Mac: ").lower()
+    a = _ask("Press Return when you've done the iPhone steps, type a for Android, or n if your bank texts don't "
+             "reach this Mac: ").lower()
     if a.startswith("n"):
         config.set_value("read_sms", "false")
         return Step("sms", "you", "skipped", "Bank texts off (read_sms is false)")
+    if a.startswith("a"):
+        return walk_android(step)
     return Step("sms", "you", "ok", "Bank texts: forwarding and Full Disk Access done (the next sync checks them)")
+
+
+def walk_android(step: Step) -> Step:
+    """Android: the folder SMS Backup & Restore's files land in on this Mac."""
+    while True:
+        raw = _ask("Drag the folder your backups land in here (or type its path) and press Return.\n"
+                   "Press Return alone to do this later: ")
+        folder = re.sub(r"\\(.)", r"\1", raw.strip().strip("'\""))     # a dragged path comes with \ before spaces
+        if not folder:
+            return step
+        if not os.path.isdir(os.path.expanduser(folder)):
+            print("That isn't a folder on this Mac. Is the drive's app running, with that folder kept on this Mac?")
+            continue
+        try:
+            config.set_value("sms_backup_folder", json.dumps(folder))
+        except config.Refused as e:
+            print(e)
+            continue
+        config.set_value("read_sms", "false")
+        return Step("sms", "you", "ok", "Bank texts from Android backups (the next sync reads them)")
 
 
 def walk_statements(step: Step, prompts: dict) -> Step:

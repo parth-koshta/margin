@@ -15,8 +15,10 @@ how to adapt Margin to another bank or country, and how to work on the code with
    one record to debug, they say so first, and you keep it to that record.
    In Claude Code the data guard (`.claude/hooks/data_guard.py`, a PreToolUse hook in `.claude/settings.json`)
    backs this up. It checks every tool call's input and refuses the ones that would read the data folder, its
-   backups, the Messages database, Margin's Keychain secrets or the real page, Python that loads Margin's code
-   without `MARGIN_DATA` set to another folder, and the `margin` commands that print personal things. Changes to
+   backups, the Messages database, the Android text backups folder (`sms_backup_folder`), Margin's Keychain
+   secrets or the real page, Python that loads Margin's code without `MARGIN_DATA` set to another folder, and the
+   `margin` commands that print personal things. Never open, list or search a text backup file yourself: it holds
+   every text on their phone, not just the banks'. Changes to
    the guard or to Claude Code's settings files wait for the person's approval, and if the guard itself fails it
    refuses. **It's an accident guard, not a sandbox:** it can't see what a program does once it runs, so the rule
    is yours to keep, not the guard's. Never disable it or work around it; if it blocks something you need, use
@@ -28,8 +30,9 @@ how to adapt Margin to another bank or country, and how to work on the code with
    Terminal (input is hidden and goes to the Keychain). Never ask them to paste one to you, and never put one on a
    command line or in `settings.json`.
 3. **Some steps are theirs.** You can't and mustn't do these for them: signing in to Google and approving access,
-   granting Full Disk Access in System Settings, turning on Text Message Forwarding on their iPhone, approving
-   Touch ID, typing passwords. Tell them exactly what to click, then check the result with `margin doctor`.
+   granting Full Disk Access in System Settings, turning on Text Message Forwarding on their iPhone or setting up
+   the backup app on their Android phone, approving Touch ID, typing passwords. Tell them exactly what to click,
+   then check the result with `margin doctor`.
 4. **Margin never trades.** Don't add anything that places, changes or cancels orders, or moves money. Stop-losses
    are alerts only. The investment analysis describes and measures; it never recommends.
 5. **Made-up data only** in tests, examples, docs, comments, the demo and screenshots (see
@@ -95,7 +98,8 @@ which checks it before saving. Nobody else needs to open the file.
 |---|---|---|
 | `currency` | Home currency (ISO code). Everything is totalled in it. `"USD"` turns on the US wording in the Gmail search and reads banks in both countries (Citi, Amex) in dollars | `"INR"` (default), `"USD"` |
 | `self_names` | Their name as banks print it, for transfers to themselves | `["KAVYA MENON", "MENON KAVYA"]` |
-| `read_sms` | Do their bank texts reach this Mac (iPhone + Text Message Forwarding)? | `true` / `false` |
+| `read_sms` | Do their bank texts reach this Mac's Messages (iPhone + Text Message Forwarding)? `false` for Android | `true` / `false` |
+| `sms_backup_folder` | Android: the folder on this Mac their phone's text backups land in (step 4) | `"~/Library/CloudStorage/…/SMS backups"` |
 | `misc_below` | Small unsorted spends below this go to Miscellaneous. 100 suits rupees; use ~3 for dollars/euros | `100` |
 | `about_me` | Facts that help the AI sort | `["Money from friends is usually a split bill"]` |
 | `ai` | Which AI sorts and writes reviews? They run `margin setup-ai` (below) | `{"provider": "codex", "model": null}` |
@@ -125,7 +129,7 @@ Others (rarely needed): `backfill_days` (365), `ai_model` ("sonnet": Claude's mo
 the home currency isn't INR; with rupees at home they're always read).
 
 **Living in the US**: `"currency": "USD"`, `"misc_below": 3`, their name as US banks print it in `self_names`.
-Then ask them to turn on alerts in each bank's and card's app: email (and text, if they forward texts) for every
+Then ask them to turn on alerts in each bank's and card's app: email (and text, if their texts reach Margin) for every
 transaction, deposits, the daily available balance, and the statement. That's what Margin reads each night.
 
 ### Steps 3 to 5 are theirs
@@ -156,15 +160,35 @@ Walk them through it; they must be signed in to Google Cloud with **their person
 Problems: Publish greyed out → step 4 incomplete. "Access blocked" → step 5 skipped. "No long-lived token" → they
 remove margin at <https://myaccount.google.com/permissions>, then redo step 7.
 
-### 4. Bank texts (iPhone users; they do it; 2 minutes)
+### 4. Bank texts (they do it; 2 minutes on an iPhone, 10 on Android)
 
+Ask which phone they have.
+
+**iPhone**:
 1. iPhone: **Settings → Apps → Messages → Text Message Forwarding** → turn on this Mac.
 2. Mac: **System Settings → Privacy & Security → Full Disk Access** → `+` → ⌘⇧G → paste the Python path
    (`python_for_full_disk_access` in `margin doctor --json`) → Open → switch on. (Full Disk Access is for that
    Python only, so the nightly sync can read the Messages database.)
 3. Optional, for older texts: **Messages in iCloud** on the iPhone and the Mac.
 
-No iPhone or texts don't reach the Mac: `margin config set read_sms false`. The first sync checks it.
+**Android** (texts arrive as a backup file, so up to a day late; `margin/smsbackup.py`):
+1. Phone: **SMS Backup & Restore** (by SyncTech, Play Store) → set up a backup: messages only (not calls), to
+   Google Drive, Dropbox or OneDrive, no backup password (Margin can't open encrypted ones), scheduled daily.
+2. Mac: that drive's app (Google Drive for desktop, Dropbox, OneDrive), with the backup folder kept on this Mac
+   (available offline).
+3. The folder: `margin setup` in their Terminal asks them to drag it in. Or they tell you the path and you run
+   `margin config set read_sms false` and `margin config set sms_backup_folder "<the folder>"`. Don't list or open
+   the folder to find it (rule 1; the data guard refuses once it's set). A backup they drop into the statements
+   folder by hand is read too.
+4. After the next `margin sync`, check `texts_backup` in `margin doctor --json`. "Couldn't open the backup
+   folder" → Full Disk Access for the Python, as in iPhone step 2. "N days old" → the phone's schedule stopped.
+
+The backup app puts all their texts in their drive, under that company's terms: say so before they choose it.
+Margin reads the received texts from service senders in it and nothing else (no texts from people, sent texts,
+MMS, RCS chats or calls). A changed file is read again; texts already read are skipped, so full, archive and
+incremental backups all work.
+
+Neither, or texts don't reach the Mac: `margin config set read_sms false`. The first sync checks it.
 
 Margin reads texts from service senders only: Indian bank IDs (`JD-HDFCBK-S`) and US short codes (5 or 6 digits).
 Texts from phone numbers (people) are never read. Chase (24273), Bank of America (73981) and Wells Fargo (93557)
@@ -315,7 +339,7 @@ service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the 
 |---|---|
 | `sync.py` | The nightly pipeline: Gmail + texts → payments, balances, reviews, investments |
 | `parse.py`, `categorize.py` | Reading bank alerts; built-in category rules (the person's own are in `rules.json`) |
-| `gmail.py`, `sms.py` | Read-only Gmail; the Messages database |
+| `gmail.py`, `sms.py`, `smsbackup.py` | Read-only Gmail; the Messages database (iPhone); Android text backups (SMS Backup & Restore files) |
 | `money.py`, `fx.py` | Home currency, formatting and detection; exchange rates (ECB) |
 | `llm.py` | The one way to ask an AI (Claude Code, Codex, Gemini CLI, OpenAI-compatible APIs, Ollama): same payload for each, answers checked against the schema |
 | `ai.py`, `review.py`, `invreview.py` | AI sorting; spending reviews and checks; investment analysis |

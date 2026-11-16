@@ -21,7 +21,7 @@ OPTIONAL = {"lock_minutes": (int, float), "other_investments": list, "us_snapsho
             "indmoney": bool}
 # Their values describe the person (names, money, facts): shown only as "set, N entries" unless --show.
 PERSONAL = {"self_names", "about_me", "other_investments", "us_snapshot", "ppf", "old_hostnames", "ignored_senders",
-            "project_categories", "trusted_senders", "extra_categories"}
+            "project_categories", "trusted_senders", "extra_categories", "sms_backup_folder"}
 # Settings naming a program the nightly sync runs (with prompts built from money data): set by hand only.
 # Settings naming a program the nightly sync runs, or an address it sends to (prompts built from money data): set by
 # hand only. (Not "host": old_hostnames only lists names the page answers to on this Mac.)
@@ -117,6 +117,13 @@ def parse_value(key: str, text: str):
         return value
     if not isinstance(value, str):
         value = text
+    if key == "sms_backup_folder":
+        value = value.strip()
+        where = os.path.realpath(os.path.expanduser(value)) if value else ""
+        if where and (where == "/" or where == os.path.realpath(os.path.expanduser("~"))
+                      or os.path.realpath(paths.PROJECT_DIR).startswith(where.rstrip("/") + "/")):
+            raise Refused("sms_backup_folder is the folder the backup app's files land in (e.g. a folder in Google "
+                          "Drive), not a folder that holds everything else.")
     if key == "currency":
         from . import money
         value = value.strip().upper()

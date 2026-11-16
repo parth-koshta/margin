@@ -1,4 +1,4 @@
-"""Bank SMS from this Mac's Messages app (needs iPhone text forwarding + Full Disk Access)."""
+"""Bank SMS from this Mac's Messages app (needs iPhone text forwarding + Full Disk Access). Android: smsbackup.py."""
 from __future__ import annotations
 
 import re

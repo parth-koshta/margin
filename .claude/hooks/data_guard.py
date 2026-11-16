@@ -11,6 +11,8 @@ JSON on stdin. It refuses (exit code 2; the reason on stderr goes back to Claude
   server.key, private-words.txt, logs), and $MARGIN_DATA when it points somewhere other than a temporary folder;
 - backups of it in ~/Library/Application Support/Margin Backups/ (the verification-scripts folder stays open);
 - the Messages database, ~/Library/Messages (bank texts);
+- the folder of Android text backups named in the data folder's settings.json (`sms_backup_folder`): every text
+  on the person's phone;
 - Margin's Keychain secrets (`security find-generic-password -w ... margin`);
 - the real page, http://margin.localhost/ (127.0.0.1 / localhost / [::1] on port 80), with curl, wget, a script
   or a browser tool;
@@ -84,6 +86,7 @@ WHAT = {
     "data": "Margin's private data folder",
     "backup": "a backup of Margin's private data",
     "messages": "the Messages database (bank texts)",
+    "texts": "the person's text-message backups (Android)",
 }
 AS_TEXT = ("\nIf you only meant the folder's name as text (a search pattern, a message, a commit message), write it "
            "differently, e.g. \"the data folder\" or DATA_DIR.")
@@ -106,6 +109,22 @@ def _temporary(p: str, home: str) -> bool:
     return any(_inside(p, t) for t in tmp)
 
 
+def _texts_folder(data: str, home: str) -> str | None:
+    """The Android text backups folder named in that data folder's settings.json (sms_backup_folder), if any. Never
+    a folder that holds the home folder or this repository: guarding that would block everything."""
+    try:
+        with open(os.path.join(data, "settings.json"), encoding="utf-8") as f:
+            value = json.load(f).get("sms_backup_folder")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    p = _real(_expand_user(value.strip(), home))
+    if not os.path.isabs(p) or _inside(_real(home), p) or _inside(_real(REPO), p):
+        return None
+    return p
+
+
 def protected(home: str, env) -> list[tuple[str, str]]:
     """(folder, kind) pairs nothing may read. Backups are guarded one dated folder at a time, so the backup folder
     can still be listed and its verification-scripts folder used."""
@@ -117,6 +136,10 @@ def protected(home: str, env) -> list[tuple[str, str]]:
         p = _real(_expand_user(custom, home))
         if not _temporary(p, home):
             roots.append((p, "data"))
+    for data in [root for root, kind in roots if kind == "data"]:
+        texts = _texts_folder(data, home)
+        if texts:
+            roots.append((texts, "texts"))
     backups = os.path.join(support, "Margin Backups")
     try:
         for name in os.listdir(backups):

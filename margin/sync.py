@@ -8,11 +8,12 @@ import subprocess
 import time
 from datetime import datetime, timedelta
 
-from . import categorize, db, epf, fx, gmail, money, networth, parse, paths, review, sms
+from . import categorize, db, epf, fx, gmail, money, networth, parse, paths, review, sms, smsbackup
 
 DEFAULT_SETTINGS = {
     "backfill_days": 365,
-    "read_sms": True,        # set to false if your bank texts don't reach this Mac (e.g. Android phone)
+    "read_sms": True,        # read bank texts from this Mac's Messages (iPhone); false with an Android phone
+    "sms_backup_folder": "", # Android: the folder SMS Backup & Restore's files land in on this Mac (smsbackup.py)
     "trusted_senders": [],   # extra email domains / SMS IDs to treat as banks, e.g. "kotak811", "VM-MYBANK"
     "ignored_senders": [],   # senders you marked "not a bank" (hidden from Needs a look / Sort out)
     "self_names": [],        # your own name(s) as banks print them, to spot transfers to yourself
@@ -317,6 +318,58 @@ def retry_review(conn: sqlite3.Connection, settings: dict) -> int:
     return n
 
 
+def read_text_backups(conn: sqlite3.Connection, settings: dict, seen: set, backfill_epoch: float, counts: dict,
+                      problems: list) -> dict:
+    """Bank texts from an Android phone's SMS Backup & Restore files (smsbackup.py). Texts inside the backfill
+    window are read like any text; older ones only for EPF, as the Messages reader does once. Returns what the
+    doctor needs, counts and dates only: {state, files, newest (date of the newest file)}."""
+    try:
+        files, notes = smsbackup.find(settings)
+    except PermissionError:
+        problems.append("Text backups: macOS didn't let the sync open the backup folder. Give Full Disk Access to "
+                        "the Python in margin doctor, then run margin sync.")
+        return {"state": "no_access", "files": 0, "newest": None}
+    problems += [f"Text backups: {n}" for n in notes]
+    if not files:
+        state = "missing" if notes else ("none" if smsbackup.folder(settings) else "off")
+        return {"state": state, "files": 0, "newest": None}
+    short_codes, state = sms.short_codes_for(settings), "ok"
+    for f, sig in smsbackup.changed(conn, files):
+        try:
+            for m in smsbackup.read(f, short_codes):
+                uid = f"sms:{m['id']}"
+                if uid in seen:
+                    continue
+                if m["ts_epoch"] < backfill_epoch:
+                    if epf.is_epfo(m["sender"]) and epf.store(conn, uid, sms.iso_local(m["ts_epoch"]), m["text"]):
+                        counts["epf"] = counts.get("epf", 0) + 1
+                    continue
+                seen.add(uid)
+                kind = ingest(conn, m, "sms", settings)
+                counts["sms"] += 1
+                counts[kind] = counts.get(kind, 0) + 1
+            smsbackup.mark_read(conn, f, sig, files)
+        except smsbackup.NotABackup:
+            smsbackup.mark_read(conn, f, sig, files, texts=False)   # a calls backup or other XML: don't look again
+        except smsbackup.Unreadable as e:
+            problems.append(f"Text backups: {f.name} {e}.")
+            state = "unreadable"
+        except PermissionError:
+            problems.append("Text backups: macOS didn't let the sync open a backup file. Give Full Disk Access to "
+                            "the Python in margin doctor, then run margin sync.")
+            state = "no_access"
+            break
+        except OSError as e:   # a drive's file that can't be fetched right now: tried again next sync
+            problems.append(f"Text backups: {f.name} couldn't be opened ({e.strerror or 'error'}); the next sync "
+                            "tries again.")
+            state = "unreadable"
+        conn.commit()
+    n, when = smsbackup.newest(conn, files)
+    if not n and state == "ok":
+        state = "none"                                   # files, but none of them a texts backup
+    return {"state": state, "files": n, "newest": datetime.fromtimestamp(when).date().isoformat() if when else None}
+
+
 def refresh_dashboard(conn: sqlite3.Connection) -> None:
     """After a change: record today's net worth (the page itself is built fresh on every request)."""
     networth.snapshot(conn)
@@ -403,6 +456,9 @@ def run(quiet_notify: bool = False) -> int:
     else:
         problems.append(f"SMS: {why} Grant Full Disk Access (see margin doctor) or set read_sms to false in settings.json.")
 
+    progress("Reading text backups", force=True)
+    backups = read_text_backups(conn, settings, seen, backfill_epoch, counts, problems)
+
     progress("Reading downloaded statements", force=True)
     try:   # bank, card and broker files in the statements folder (imports.py); never breaks the sync
         from . import imports
@@ -429,9 +485,11 @@ def run(quiet_notify: bool = False) -> int:
     problems += [f"Statements: {n}" for n in notes]
     networth.snapshot(conn)   # today's net worth
     status = {"at": datetime.now().isoformat(timespec="seconds"), "ok": not any(
-        p.startswith(("Gmail:", "SMS: No permission")) for p in problems), "problems": problems, "counts": counts,
+        p.startswith(("Gmail:", "SMS: No permission", "Text backups: macOS")) for p in problems),
+        "problems": problems, "counts": counts,
         "sms": "off" if not settings["read_sms"] else ("ok" if ok and not any(
-            p.startswith("SMS:") for p in problems) else "no_access")}
+            p.startswith("SMS:") for p in problems) else "no_access"),
+        "texts_backup": backups}
     db.set_state(conn, "last_sync", json.dumps(status))
     conn.commit()
     reviews_written = []
