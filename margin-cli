@@ -1,4 +1,4 @@
 #!/bin/sh
-# Margin: private money tracker. Usage: margin sync | open | doctor | setup-gmail | rule | trust | schedule
+# Margin: private money tracker. Usage: margin setup | sync | open | doctor | config | update | rule | trust
 DIR="$(dirname "$(readlink -f "$0")")"
 PYTHONPATH="$DIR" exec /usr/bin/python3 -m margin "$@"

@@ -7,10 +7,17 @@ how to adapt Margin to another bank or country, and how to work on the code with
 ## Rules (always)
 
 1. **Their money data never leaves their Mac through you.** It lives in `~/Library/Application Support/Margin/`
-   (`MARGIN_DATA` overrides it). Don't print, copy, summarise or paste its contents (`money.db`, `settings.json`,
-   `rules.json`, `statements/`) into chat, files in the repo, issues, commits or anything online. When you need to
-   check something, query counts or yes/no answers, not values. If you must look at one record to debug, say so
-   first and keep it to that record.
+   (`MARGIN_DATA` overrides it). Don't read, print, copy, summarise or paste its contents (`money.db`,
+   `settings.json`, `rules.json`, `statements/`, `server.key`, logs) into chat, files in the repo, issues,
+   commits or anything online, and don't open their page (<http://margin.localhost/>) with a browser tool.
+   Learn what you need from `margin doctor --json` (checks and counts) and `margin config get` (settings;
+   personal ones only as counts); change settings with `margin config set`. If the person wants you to look at
+   one record to debug, they say so first, and you keep it to that record.
+   In Claude Code this is enforced: the data guard (`.claude/hooks/data_guard.py`, a PreToolUse hook in
+   `.claude/settings.json`) refuses tool calls that would read the data folder, its backups, the Messages
+   database, Margin's Keychain secrets or the real page, and Python that imports Margin's code without a
+   temporary `MARGIN_DATA`. Never disable it or work around it; if it blocks something you need, use the
+   `margin` command it names, or ask the person.
 2. **Secrets go into hidden prompts, never chat.** Statement passwords, PAN, PRAN and AI API keys are typed by the
    person into `margin setup-pan`, `margin setup-pran`, `margin setup-ppf` or `margin setup-ai` in their own
    Terminal (input is hidden and goes to the Keychain). Never ask them to paste one to you, and never put one on a
@@ -29,33 +36,46 @@ how to adapt Margin to another bank or country, and how to work on the code with
 
 ## Setup
 
-Run these in order. `margin` below means `~/projects/margin/margin-cli` (or wherever the repo is) until step 1.
+In Claude Code, the `margin-setup` skill (`.claude/skills/`) follows these steps. `margin` below means
+`./margin-cli` in the repo folder until step 1 is done.
 
-### 0. Check the Mac
+`margin setup` does every step that needs no one's hands and can be run again at any time: each step checks first
+and only does what's missing. It stops at the person's steps (Gmail sign-in, bank texts, statement passwords)
+and says exactly what to do. Run by you (no terminal) it lists them and exits with status 3; in the person's own
+Terminal it waits for them, step by step.
 
 ```bash
-sw_vers -productVersion                 # macOS
-xcode-select -p                         # command line tools; if missing, the person runs: xcode-select --install
-/usr/bin/python3 --version              # 3.9 or newer (comes with the command line tools)
-/usr/bin/swiftc --version               # for the Margin app, the PDF reader and the Touch ID prompt
-command -v claude codex gemini ollama   # optional: any one AI, for sorting and reviews
+./margin-cli setup --dry-run          # what it would do; changes nothing
+./margin-cli setup --json --no-sync   # do it; statuses only: steps, waiting_on_you, failed
 ```
 
 Try the demo first so they see what they're setting up: `./margin-cli demo` (US person, dollars) or
 `./margin-cli demo --india` (Indian person, rupees). Stop it with Ctrl-C.
 
-### 1. The `margin` command
+### 0. Check the Mac (`margin setup` does it)
 
-```bash
-echo 'alias margin="$HOME/projects/margin/margin-cli"' >> ~/.zshrc     # adjust the path to the repo
-```
+macOS, the Xcode command line tools, Python 3.9 or newer and Swift (both come with the tools; Swift also builds
+the Margin app), and optionally an AI for sorting and reviews (Claude Code, Codex, Gemini CLI or Ollama; see
+"Which AI" below). If the tools are missing, setup waits: the person runs `xcode-select --install`, clicks
+Install, then you run setup again.
 
-They open a new Terminal window. Check: `margin doctor` runs (it will show what's missing).
+### 1. The `margin` command (`margin setup` does it)
+
+A link `~/.local/bin/margin` to this repo's `margin-cli`, and `~/.local/bin` on the PATH in `~/.zshrc`
+(`~/.bash_profile` for bash). Check: in a new Terminal window, `margin doctor` runs.
 
 ### 2. Their settings
 
-Ask, then write `~/Library/Application Support/Margin/settings.json` (create the folder with `margin doctor` or
-`margin sync` first; keep the file 0600). Only the keys they need; everything else has a default.
+`margin setup` writes `settings.json` with every default. Ask what applies, then set only the keys they need:
+
+```bash
+margin config set currency USD
+margin config set self_names '["KAVYA MENON", "MENON KAVYA"]'
+margin config get                    # what's set; personal values show only as counts
+```
+
+`config set` checks the type and refuses secrets (it names the hidden-prompt command instead). Nobody needs to
+open the file.
 
 | Key | Ask them | Example |
 |---|---|---|
@@ -94,6 +114,11 @@ the home currency isn't INR; with rupees at home they're always read).
 Then ask them to turn on alerts in each bank's and card's app: email (and text, if they forward texts) for every
 transaction, deposits, the daily available balance, and the statement. That's what Margin reads each night.
 
+### Steps 3 to 5 are theirs
+
+`margin setup --json` lists each one that's still open under `waiting_on_you`, with the instructions in its
+`how`. The details are below; walk them through one or two steps at a time.
+
 ### 3. Gmail, read-only (they do it; about 10 minutes)
 
 Walk them through it; they must be signed in to Google Cloud with **their personal Gmail**.
@@ -108,7 +133,8 @@ Walk them through it; they must be signed in to Google Cloud with **their person
 6. **Clients** → **Create client** → **Desktop app**, name `margin-mac` → **Download JSON**.
 7. You run: `margin setup-gmail ~/Downloads/client_secret_*.json`. Their browser opens; they pick their Gmail,
    click **Advanced → Go to margin (unsafe)** (it's their own app), allow read-only access.
-   Check: Terminal says `Connected read-only to …`.
+   Check: Terminal says `Connected read-only to …`; `margin doctor --json` has `gmail` and `gmail_token` ok.
+   (Or they run `margin setup` in their own Terminal: it asks for the file and does the same.)
 8. You run: `rm ~/Downloads/client_secret_*.json` (its contents are now in the Keychain).
 
 Problems: Publish greyed out → step 4 incomplete. "Access blocked" → step 5 skipped. "No long-lived token" → they
@@ -117,12 +143,12 @@ remove margin at <https://myaccount.google.com/permissions>, then redo step 7.
 ### 4. Bank texts (iPhone users; they do it; 2 minutes)
 
 1. iPhone: **Settings → Apps → Messages → Text Message Forwarding** → turn on this Mac.
-2. Mac: **System Settings → Privacy & Security → Full Disk Access** → `+` → ⌘⇧G → paste the Python path that
-   `margin doctor` prints → Open → switch on. (Full Disk Access is for that Python only, so it can read
-   `~/Library/Messages/chat.db`.)
+2. Mac: **System Settings → Privacy & Security → Full Disk Access** → `+` → ⌘⇧G → paste the Python path
+   (`python_for_full_disk_access` in `margin doctor --json`) → Open → switch on. (Full Disk Access is for that
+   Python only, so the nightly sync can read the Messages database.)
 3. Optional, for older texts: **Messages in iCloud** on the iPhone and the Mac.
 
-No iPhone or texts don't reach the Mac: `"read_sms": false`.
+No iPhone or texts don't reach the Mac: `margin config set read_sms false`. The first sync checks it.
 
 Margin reads texts from service senders only: Indian bank IDs (`JD-HDFCBK-S`) and US short codes (5 or 6 digits).
 Texts from phone numbers (people) are never read. Chase (24273), Bank of America (73981) and Wells Fargo (93557)
@@ -135,7 +161,8 @@ they trust it (`margin trust 55512`). With rupees at home, short codes are read 
 Only what applies to them. Files go in `~/Library/Application Support/Margin/statements/` (the "statements
 folder"); every file there is read each night on the Mac, and a changed file is read again.
 
-In India:
+In India, each password typed by them in **their own Terminal window** (not in Claude Code, not with `!`; the data
+guard refuses these there):
 - Indian stocks and funds: `margin setup-pan` (CDSL statements are locked with the PAN).
 - NPS: `margin setup-pran`.
 - SBI PPF statement: `margin setup-ppf` (the statement's password).
@@ -143,6 +170,7 @@ In India:
 - Other brokers: a holdings CSV export (a name and a current-value column) in the statements folder.
 
 Each `setup-*` asks in a hidden prompt, saves to the Keychain and checks it opens their latest statement.
+Check: `secrets_saved` in `margin doctor --json`.
 
 In the US (no passwords; they download, you check):
 - **Bank and card activity**: on each bank's or card's website, *Download account activity* (or *Export*), as CSV
@@ -165,14 +193,13 @@ Rows from bank files are stored without the fields that can carry the account ho
 Check after the next `margin sync`: `margin doctor`, then the page's Net worth and Investments. Notes about files
 that couldn't be read show in the sync's problems ("Statements: ...").
 
-### 6. Schedule, app, first sync
+### 6. Schedule, app, first sync (`margin setup` does it)
 
-```bash
-margin schedule install     # the nightly 00:00 sync (launchd)
-margin app install          # the Margin app (its own window) and the always-on page at http://margin.localhost/
-margin sync                 # first run reads 12 months of mail; can take an hour; safe to close Terminal
-margin doctor               # every line should be ✓
-```
+`margin setup` builds the Swift helpers (the PDF reader and the Touch ID prompt, into the data folder's `bin/`),
+schedules the nightly 00:00 sync (`margin schedule install`), installs the Margin app and the always-on page at
+<http://margin.localhost/> (`margin app install`), and once Gmail is connected starts the first sync in the
+background (it reads 12 months of mail; up to an hour). `margin sync` shows its progress; so does `sync` in
+`margin doctor --json`.
 
 They open **Margin** from Spotlight (or drag it to the Dock): the page in a window of its own, built on their Mac
 with swiftc. Touch ID asks on first open. It's the private way to use Margin: browser extensions that can read all
@@ -193,11 +220,23 @@ In the page's **Sort out**: pick categories for the biggest payees (each becomes
 
 ### Verify
 
-`margin doctor` all ✓; the Margin app opens the page in its own window and locks after two minutes away (and at
-once when hidden); `margin schedule status` installed; the
-next morning, "Updated … 12:0x am" at the top of the page.
+`margin setup --json`: `waiting_on_you` and `failed` empty. `margin doctor --json` after the first sync: every
+check ok, `counts.transactions` above 0. The person checks the page: it opens, locks after two minutes away, and
+the next morning says "Updated … 12:0x am" at the top.
+
+The Margin app opens the page in its own window and locks at once when it's hidden.
+
+## Updating
+
+`margin update` (the `margin-update` skill): `git pull --ff-only` (never a merge), the tests on a temporary data
+folder, then it rebuilds the Swift helpers and the app and reloads the launchd agents. If the tests fail it goes
+back to the previous version by itself. It waits while a sync runs and never reads or changes their data.
+`margin update --check` only says whether there's something new. Afterwards: `margin doctor --json` and
+`margin setup --json` (a new version can bring a new step).
 
 ## Adding a bank or a country
+
+The `margin-add-bank` skill follows this section.
 
 - **A sender Margin doesn't count**: `margin trust "<domain, SMS ID or short code>"`, or *My bank* in Sort out.
   A credit union or small US bank is usually just this: once trusted, its alerts are read like any US bank's.
@@ -239,6 +278,11 @@ answer against the job's schema. Test AI changes with the fake providers in `tes
 person's data to an AI while working on the code; try a real CLI only with a made-up payload, and only after they
 agree (it uses their account).
 
+To try Margin's code by hand, give it a temporary folder: `MARGIN_DATA="$(mktemp -d)" python3 -c '…'` (the data
+guard refuses Python that imports `margin` without one). Commands that change launchd, the app or the Keychain
+(`setup`, `update`, `schedule`, `app`) act on the person's real install: don't run them while developing without
+their yes; the tests replace them with stand-ins.
+
 The page is `margin/dashboard.py` (one HTML template, built on request); after changing it, restart the page
 service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the demo. After changing
 `margin/macapp.swift`, `margin app install` builds the app again (the demo's own copy rebuilds itself), and
@@ -260,6 +304,9 @@ service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the 
 | `pdf.py`, `pdftext.swift`, `keychain.py` | Locked PDFs via PDFKit; Keychain secrets |
 | `demo.py` | The made-up demo people and the stand-ins for the AI, sync and Touch ID |
 | `privacy.py`, `.githooks/` | The leak guard |
+| `install.py`, `health.py`, `config.py` | `margin setup` and `update`; `doctor` (and `--json`); `config get/set` |
+| `.claude/hooks/data_guard.py`, `.claude/settings.json` | Claude Code's data guard (tests in `tests/test_data_guard.py`) |
+| `.claude/skills/` | Claude Code skills: `margin-setup`, `margin-update`, `margin-add-bank` |
 
 ### Made-up data
 

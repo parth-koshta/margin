@@ -34,6 +34,7 @@ NEVER_FILES = re.compile(r"(^|/)(statements/|.*\.pdf$|.*\.db$|.*\.db-\w+$|.*\.sq
                          r"rules\.json$|server\.key$|server\.json$|client_secret.*\.json$|.*\.p12$|.*\.pem$|"
                          r".*\.mbox$|.*\.eml$|chat\.db|assets\.csv$|private-words\.txt$)", re.I)
 MEDIA = re.compile(r"\.(png|jpe?g|gif|webp|heic|mov|mp4|m4v|webm)$", re.I)
+CLAUDE_SETTINGS = ".claude/settings.json"   # Claude Code's project settings (the data guard hook): code, not data
 TEXT_LIMIT = 2_000_000
 COMMON = {"payout", "payouts", "cashback", "autopay", "netbanking", "upi", "emi", "sip", "neft", "imps", "rtgs",
           "nach", "ecs", "atm", "pos", "ecom", "billpay", "recharge", "fastag", "forex", "petrol", "salary"}
@@ -306,7 +307,7 @@ def _files_at(commit: str) -> list[tuple[str, bytes]]:
 def scan(files: list[tuple[str, bytes]], mine: Personal | None) -> list[str]:
     problems = []
     for name, blob in files:
-        if NEVER_FILES.search(name):
+        if NEVER_FILES.search(name) and name != CLAUDE_SETTINGS:      # it's still scanned line by line below
             problems.append(f"{name}: this kind of file must never be committed (private data)")
             continue
         if MEDIA.search(name):

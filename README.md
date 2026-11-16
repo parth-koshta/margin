@@ -40,13 +40,54 @@ Use it for screenshots and videos: it's the only Margin that should ever be on s
 
 ## Set it up
 
-**With a coding agent** (Claude Code, Codex, Gemini CLI or similar): open this folder and ask it to set Margin
-up. It follows [AGENTS.md](AGENTS.md), which covers every step, the checks after each one, and the steps only you
-can do (signing in to Google, granting Full Disk Access, typing passwords and API keys into hidden prompts).
+You need macOS with the Xcode command line tools (`xcode-select --install`, which also provides Python 3.9+ and
+Swift), and optionally an AI for sorting and reviews ([any of these](#works-with-any-ai)).
 
-**By hand**: follow the same steps in [AGENTS.md](AGENTS.md#setup), in order. You need macOS with the Xcode
-command line tools (`xcode-select --install`, which also provides Python 3.9+ and Swift), and optionally an AI
-for sorting and reviews ([any of these](#works-with-any-ai)).
+### Set it up with Claude Code
+
+Get the code and start Claude Code **in its folder**, so it loads Margin's skills and its data guard:
+
+```bash
+git clone https://github.com/<you>/margin ~/projects/margin   # wherever you like
+cd ~/projects/margin
+claude
+```
+
+Then paste this:
+
+```text
+Set up Margin on this Mac for me with the margin-setup skill. Do every step you can, tell me exactly what to do for the steps only I can do, and never look at my money data.
+```
+
+Claude runs `margin setup`, asks you a few questions (your currency, your name as banks print it), and walks you
+through the steps only you can do: signing in to Google, turning on text forwarding and Full Disk Access, and
+typing statement passwords into hidden prompts in your own Terminal. Later, "update Margin" uses the
+`margin-update` skill, and "Margin doesn't count my bank" the `margin-add-bank` skill.
+
+Claude never sees your money: in this folder a hook (the [data guard](#privacy)) refuses any attempt to read your
+data folder, your messages, Margin's Keychain secrets or your page. Claude learns how things stand from
+`margin doctor --json`, which holds statuses and counts only.
+
+**With another coding agent** (Codex, Gemini CLI or similar): open this folder and ask it to set Margin up. It
+follows [AGENTS.md](AGENTS.md), which covers every step and the steps only you can do. The data guard and the
+skills are Claude Code's; with another agent, the AGENTS.md rules are the only guard.
+
+### Set it up yourself
+
+```bash
+cd ~/projects/margin
+./margin-cli setup
+```
+
+It does every step it can (the `margin` command, your private data folder, the nightly sync, the Margin app) and
+walks you through the rest, waiting while you do each one. Run it again any time: it only does what's missing.
+[AGENTS.md](AGENTS.md#setup) has every step in detail. Change settings with `margin config set`, for example
+`margin config set currency USD`.
+
+### Keep it up to date
+
+`margin update` gets the latest version (fast-forward only), runs the tests, rebuilds and restarts Margin. If the
+tests fail it goes back to the version you had. It never touches your data.
 
 ## Works with any AI
 
@@ -133,7 +174,7 @@ and use it to improve its models, so check your plan's data settings first. Turn
 - **Touch ID lock**: two minutes after you leave the page (another tab, another app, or sleep), Margin locks and
   asks for Touch ID (or your Mac password). While locked the server sends no data at all. The **Lock** button
   locks at once, and so does hiding or quitting the Margin app, or your Mac locking or sleeping.
-  `"lock_minutes"` in `settings.json` changes the time (0 turns it off).
+  `margin config set lock_minutes 5` changes the time (0 turns it off).
 - **Statement passwords** (PAN, PRAN, PPF statement password) are typed into hidden Terminal prompts and kept
   in the Keychain. PDFs are opened by macOS's own PDF reader and never saved unlocked.
 - **Prices**: Indian stocks and funds come from whole-market files (NSE/BSE closes, AMFI NAVs), fetched only
@@ -145,8 +186,15 @@ and use it to improve its models, so check your plan's data settings first. Turn
 - **The AI** (optional) is the one you choose: Claude, Codex, Gemini, an API service such as Grok, or a model on
   your Mac through Ollama. Each gets the same masked data and nothing else, with its tools off; see
   [What the AI sees](#what-the-ai-sees). With Ollama and a local model nothing leaves your Mac. Turn it off with
-  `"ai_sort": false` and `"ai_review": false`; the automatic checks still run.
+  `margin setup-ai` → None (or `margin config set ai_sort false` and `margin config set ai_review false`); the
+  automatic checks still run.
 - Logs record counts only. Notifications never show amounts or payees.
+- **Claude Code in this folder can't read your data.** A hook in `.claude/settings.json` (the data guard,
+  `.claude/hooks/data_guard.py`) runs before every tool call Claude makes here and refuses anything that would
+  read your data folder or its backups, your Messages database, Margin's Keychain secrets or your page at
+  <http://margin.localhost/>. Claude works through `margin` commands that print statuses and counts only
+  (`margin doctor --json`, `margin config get`). It's a guardrail against reading your data by accident, not a
+  sandbox; the [AGENTS.md](AGENTS.md) rules it backs up still apply.
 
 ## Using it
 
@@ -154,8 +202,11 @@ and use it to improve its models, so check your plan's data settings first. Turn
 |---|---|
 | The Margin app (Spotlight), its m in the menu bar; in a browser `margin open`, then <http://margin.localhost/> | Home, Spending, Investments, Sort out, Reviews, Sync now; a quick glance from the menu bar |
 | `margin sync` | Sync now instead of waiting for midnight (or watch a running sync) |
-| `margin doctor` | Check that everything works |
+| `margin doctor` | Check that everything works (`--json`: statuses and counts only, for Claude Code) |
 | `margin setup-ai` | Choose the AI that sorts and writes the reviews ([Works with any AI](#works-with-any-ai)) |
+| `margin setup` | Set Margin up, or finish setting it up; safe to run again |
+| `margin update` | Get the latest version, test it, rebuild and restart (`--check`: is there one?) |
+| `margin config get` / `margin config set currency USD` | Read or change a setting without opening `settings.json` |
 | `margin rule "swiggy" "Food & dining"` | Put matching payees in a category (past and future) |
 | `margin trust "mybank.in"` | Count alerts from a sender Margin didn't know was a bank |
 | `margin tidy` | Sort out in Terminal instead of the page |
@@ -195,7 +246,7 @@ measures and describes but never recommends.
 
 ## Other countries and currencies
 
-Set your home currency once in `settings.json`, for example `"currency": "USD"`. Everything is totalled and shown in
+Set your home currency once, for example `margin config set currency USD`. Everything is totalled and shown in
 it. Money in any other currency is converted at the European Central Bank rate for that day and keeps a note of
 the original.
 

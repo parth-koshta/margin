@@ -9,9 +9,8 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime
 
-from . import categorize, db, gmail, paths, sms, sync, tidy
+from . import categorize, db, gmail, paths, sync, tidy
 
 
 def _job_running(uid: int) -> bool:
@@ -342,51 +341,31 @@ def cmd_schedule(a) -> int:
 
 
 def cmd_doctor(a) -> int:
-    ok = True
+    from . import health
+    return health.main(a.json, APP_PATH)
 
-    def line(good: bool, msg: str):
-        nonlocal ok
-        ok &= good
-        print(("✓ " if good else "✗ ") + msg)
 
-    line(paths.DATA_DIR.exists() and (paths.DATA_DIR.stat().st_mode & 0o077) == 0,
-         f"Private data folder (only you can open it): {paths.DATA_DIR}")
-    line(gmail.is_configured(), "Gmail connected (read-only, token in Keychain)" if gmail.is_configured()
-         else "Gmail not connected: margin setup-gmail <client_secret.json>")
-    if gmail.is_configured():
-        try:
-            gmail.access_token()
-            line(True, "Gmail token still valid")
-        except gmail.AuthError as e:
-            line(False, f"Gmail token problem: {e}")
-    # Terminal-run checks inherit Terminal's permissions, so judge SMS by what the scheduled job saw.
-    last_sms = None
-    if paths.DB_PATH.exists():
-        last = db.get_state(db.connect(), "last_sync")
-        last_sms = json.loads(last).get("sms") if last else None
-    if sync.load_settings()["read_sms"] is False:
-        line(True, "Bank SMS off (read_sms is false in settings.json)")
-    elif last_sms == "ok" or sms.available()[0]:
-        line(True, "Bank SMS readable by the sync job")
-    else:
-        line(False, "Bank SMS: the sync job couldn't read Messages yet. Give Full Disk Access to "
-             f"{_python()} (System Settings > Privacy & Security > Full Disk Access), then run margin sync.")
-    r = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{paths.LAUNCHD_LABEL}"], capture_output=True)
-    line(r.returncode == 0, "Nightly 00:00 sync scheduled" if r.returncode == 0 else
-         "Nightly sync not scheduled: margin schedule install")
-    if paths.DB_PATH.exists():
-        conn = db.connect()
-        last = db.get_state(conn, "last_sync")
-        if last:
-            s = json.loads(last)
-            age_h = (datetime.now() - datetime.fromisoformat(s["at"])).total_seconds() / 3600
-            line(s["ok"] and age_h < 30, f"Last sync {s['at']} ({'ok' if s['ok'] else 'had problems'})"
-                 + ("" if age_h < 30 else " — more than a day ago"))
-            for p in s["problems"]:
-                print(f"    · {p}")
-        else:
-            line(False, "Never synced: margin sync")
-    return 0 if ok else 1
+def _install_hooks() -> dict:
+    """What `margin setup` and `margin update` call to (re)install the app and the nightly sync."""
+    return {"app_path": APP_PATH,
+            "install_app": lambda: cmd_app(argparse.Namespace(action="install")),
+            "install_schedule": lambda: cmd_schedule(argparse.Namespace(action="install"))}
+
+
+def cmd_setup(a) -> int:
+    from . import install
+    return install.setup(a, secret_prompts={"pan": lambda: cmd_setup_pan(a), "pran": lambda: cmd_setup_pran(a),
+                                            "ppf_statement": lambda: cmd_setup_ppf(a)}, **_install_hooks())
+
+
+def cmd_update(a) -> int:
+    from . import install
+    return install.update(a, **_install_hooks())
+
+
+def cmd_config(a) -> int:
+    from . import config
+    return config.main(a)
 
 
 def main() -> int:
@@ -435,7 +414,25 @@ def main() -> int:
     s.set_defaults(fn=cmd_schedule)
     sub.add_parser("tidy", help="sort uncategorized payees and unknown senders, one question at a time"
                    ).set_defaults(fn=cmd_tidy)
-    sub.add_parser("doctor", help="check that everything works").set_defaults(fn=cmd_doctor)
+    s = sub.add_parser("doctor", help="check that everything works")
+    s.add_argument("--json", action="store_true", help="statuses and counts only, for Claude Code")
+    s.set_defaults(fn=cmd_doctor)
+    s = sub.add_parser("setup", help="set Margin up, or check the setup (safe to run again)")
+    s.add_argument("--json", action="store_true", help="statuses only, for Claude Code")
+    s.add_argument("--dry-run", action="store_true", help="say what it would do; change nothing")
+    s.add_argument("--no-sync", action="store_true", help="don't start the first sync")
+    s.set_defaults(fn=cmd_setup)
+    s = sub.add_parser("update", help="get the latest Margin, test it, rebuild and restart (never touches your data)")
+    s.add_argument("--check", action="store_true", help="only say whether there's an update")
+    s.add_argument("--force", action="store_true", help="test, rebuild and restart even when already up to date")
+    s.add_argument("--after-pull", metavar="COMMIT", help=argparse.SUPPRESS)
+    s.set_defaults(fn=cmd_update)
+    s = sub.add_parser("config", help="get or set a setting: margin config set currency USD")
+    s.add_argument("action", choices=["get", "set"])
+    s.add_argument("key", nargs="?")
+    s.add_argument("value", nargs="?")
+    s.add_argument("--show", action="store_true", help="print personal settings' values too (your own Terminal)")
+    s.set_defaults(fn=cmd_config)
     s = sub.add_parser("privacy-check", help="look for your personal details in the code before it's shared")
     s.add_argument("--staged", action="store_true", help="check what's staged for commit (git pre-commit hook)")
     s.add_argument("--commit-msg", metavar="FILE", help="check a commit message (git commit-msg hook)")
