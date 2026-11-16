@@ -7,59 +7,72 @@ description: Set Margin up on this Mac for the person, or finish a setup that st
 
 Read [AGENTS.md](../../../AGENTS.md) first, the Rules and Setup sections. The short version of the rules:
 
-- **Never look at their money data.** Don't read, list, search or copy `~/Library/Application Support/Margin/`
-  (the data guard hook refuses it anyway), don't open http://margin.localhost/ with any browser tool, and don't
-  repeat back names or numbers they tell you. You learn the state from `margin doctor --json` and
-  `margin setup --json`: statuses and counts only.
+- **Never look at their money data.** Don't read, list, search or copy their Margin data folder (the data guard
+  hook refuses it anyway, but it's an accident guard, not a sandbox), don't open http://margin.localhost/ with
+  any browser tool, and don't repeat back names or numbers they tell you. You learn the state from
+  `margin doctor --json` and `margin setup --json`: statuses and counts only.
 - **Secrets only in hidden prompts in their own Terminal.** Never ask for a PAN, PRAN, password or token in chat.
 - **Their steps are theirs:** the Google sign-in, Full Disk Access, iPhone settings, Touch ID, passwords. Tell
   them exactly what to click; then check.
+- **Ask before changing their Mac.** `margin setup` changes nothing without `--yes`, and you pass `--yes` only
+  after the person said yes to the list of changes.
 
 Until step 1 is done, `margin` means `./margin-cli` in the repository folder.
 
 ## Steps
 
-1. **See where things stand.** Run `./margin-cli setup --dry-run`. Tell the person in a few lines what it will
-   do (link the `margin` command, create the private data folder with default settings, build two small helper
-   programs, schedule the nightly sync, install the Margin app) and what will be left for them. Offer the demo
-   first if they haven't seen Margin: `./margin-cli demo` (US, dollars) or `./margin-cli demo --india`.
+1. **See where things stand.** Offer the demo first if they haven't seen Margin: `./margin-cli demo` (US,
+   dollars) or `./margin-cli demo --india`. Then run `./margin-cli setup --json --no-sync` (without `--yes` it
+   changes nothing). Read `would_change`, `waiting_on_you` and `failed`.
+   - `mac` waiting: they run `xcode-select --install` and click Install, then you run it again.
 
-2. **Run it.** `./margin-cli setup --json --no-sync`. Read `steps`, `waiting_on_you` and `failed`.
-   - `mac` waiting: they run `xcode-select --install` and click Install, then you run setup again.
-   - Anything in `failed`: show its `notes`, fix the cause (often a launchd or Swift problem), run setup again.
-   - Check: `command`, `data`, `helpers`, `schedule` and `app` are `ok` or `done`.
+2. **Ask before changing anything.** Show the person `would_change` as a short list, in plain words. It's
+   typically: a link `~/.local/bin/margin` to this folder's `margin-cli`; a line in `~/.zshrc` that puts
+   `~/.local/bin` on the PATH; the private data folder with default settings and two small helper programs; two
+   LaunchAgents (the nightly 00:00 sync and the page service); the Margin app in `~/Applications`. Ask whether to
+   go ahead and **wait for a clear yes**. If they'd rather do it themselves: they run `margin setup` in their own
+   Terminal, which asks them the same.
 
-3. **Their settings** (AGENTS.md step 2). Ask the questions in that table together, in one message, and set each
+3. **Run it** (only after the yes): `./margin-cli setup --yes --json --no-sync`.
+   - Anything in `failed`: show its `notes`, fix the cause (often a launchd or Swift problem), run it again.
+   - Check: `command`, `data`, `helpers`, `schedule` and `app` are `ok` or `done`; `changed_nothing` is false.
+
+4. **Their settings** (AGENTS.md step 2). Ask the questions in that table together, in one message, and set each
    answer with `margin config set <key> <value>` (for example `margin config set currency USD`,
    `margin config set self_names '["KAVYA MENON"]'`, `margin config set read_sms false`). Only the keys they
    need. `margin config get` shows what's set; personal values show as counts, and that's how it should stay.
-   Check: each `config set` printed the key, with no "refused" message.
+   `claude_path` is theirs to set by hand if ever needed; `config set` refuses it.
+   Check: each `config set` printed the key, with no refusal.
 
-4. **Gmail** (the `gmail` step's `how`). Walk them through the Google Cloud steps, one or two at a time. When
-   they have the downloaded JSON, run `margin setup-gmail ~/Downloads/client_secret_*.json` (their browser
-   opens; they sign in and allow read-only access), then `rm ~/Downloads/client_secret_*.json`.
-   Alternatively they run `margin setup` in their own Terminal: it waits for the file and does the same.
+5. **Gmail** (the `gmail` step's `how`). Walk them through the Google Cloud steps, one or two at a time. When
+   they've downloaded the JSON, ask for its exact file name (or list `~/Downloads/client_secret_*.json` and ask
+   which one), then run `margin setup-gmail "<that exact path>"`: their browser opens; they sign in and allow
+   read-only access. Then ask whether to delete that file (its contents are in the Keychain now) and, on a yes,
+   delete **only that exact path**: never a wildcard, which could take other apps' client secrets with it.
+   Alternatively they run `margin setup` in their own Terminal: it asks for the file, connects, and offers to
+   delete it.
    Check: `margin doctor --json` has `gmail` and `gmail_token` ok.
 
-5. **Bank texts** (the `sms` step's `how`; skip if they set `read_sms` to false). Give them the iPhone and Full
+6. **Bank texts** (the `sms` step's `how`; skip if they set `read_sms` to false). Give them the iPhone and Full
    Disk Access steps with the Python path from `python_for_full_disk_access` in `margin doctor --json`. This
    is checked by the first sync, not now.
 
-6. **Statement passwords** (the `statements` step; only what applies; India only). Ask them to open their own
+7. **Statement passwords** (the `statements` step; only what applies; India only). Ask them to open their own
    Terminal window (not this chat, not with `!`) and run `margin setup-pan`, `margin setup-pran` or
    `margin setup-ppf` there. Check: `secrets_saved` in `margin doctor --json`. EPF passbooks and other brokers'
    CSV exports go in the `statements` folder: tell them the path from the step's `how`; don't open it yourself.
 
-7. **First sync.** `margin setup --json` starts it in the background once Gmail is connected (it reads 12 months
-   of mail; up to an hour). Watch with `margin doctor --json` (`sync.progress`), not by reading logs.
+8. **First sync.** Once Gmail is connected, `margin setup --json` lists "start the first sync" under
+   `would_change`; tell them it reads 12 months of mail and can take an hour, and on their yes run
+   `margin setup --yes --json`. Watch with `margin doctor --json` (`sync.progress`), not by reading logs.
 
-8. **Verify** (AGENTS.md "Verify"):
-   - `margin setup --json`: `waiting_on_you` empty, `failed` empty.
+9. **Verify** (AGENTS.md "Verify"):
+   - `margin setup --json`: `would_change`, `waiting_on_you` and `failed` empty.
    - `margin doctor --json` after the first sync: every check ok (the `sms` check passes once a sync has read
      texts); `counts.transactions` above 0.
    - Tell them to open **Margin** from Spotlight once in each browser they use and bookmark
      http://margin.localhost/ (Touch ID asks). You don't open it.
 
-9. **Sort out** (AGENTS.md step 7) is theirs, on the page. You can explain how it works; the choices are theirs.
+10. **Sort out** (AGENTS.md step 7) is theirs, on the page. You can explain how it works; the choices are theirs.
 
 Finish with a short summary: what's set up, what's waiting on them, and `margin doctor` for next time.

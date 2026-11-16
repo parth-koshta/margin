@@ -75,7 +75,8 @@ def cmd_sync(a) -> int:
         print()
     log = paths.LOG_DIR / "sync.log"
     last = log.read_text().strip().splitlines()[-1] if log.exists() else ""
-    print(last.split(" ", 2)[-1] if last else "Done.")
+    from .health import screen_line
+    print(screen_line(last.split(" ", 2)[-1]) if last else "Done.")
     print("Open the dashboard: margin open. Details: margin doctor.")
     return 0 if " sync ok " in f" {last} " else 1
 
@@ -218,7 +219,9 @@ def cmd_serve(a) -> int:
 def cmd_setup_gmail(a) -> int:
     paths.ensure_data_dir()
     who = gmail.setup(a.client_secret)
-    print(f"Connected read-only to {who}. The token is in your macOS Keychain (service 'margin').")
+    from .health import person_watching
+    print(f"Connected read-only to {who if person_watching() else 'your Gmail'}. The token is in your macOS "
+          "Keychain (service 'margin').")
     print("You can delete the downloaded client_secret JSON now.")
     return 0
 
@@ -421,11 +424,13 @@ def main() -> int:
     s.add_argument("--json", action="store_true", help="statuses only, for Claude Code")
     s.add_argument("--dry-run", action="store_true", help="say what it would do; change nothing")
     s.add_argument("--no-sync", action="store_true", help="don't start the first sync")
+    s.add_argument("--yes", action="store_true", help="make the changes (the person agreed); without it, outside "
+                   "a Terminal, setup only reports")
     s.set_defaults(fn=cmd_setup)
     s = sub.add_parser("update", help="get the latest Margin, test it, rebuild and restart (never touches your data)")
-    s.add_argument("--check", action="store_true", help="only say whether there's an update")
+    s.add_argument("--check", action="store_true", help="list what's new; change nothing")
+    s.add_argument("--to", metavar="COMMIT", help="install exactly up to this commit from --check (the person agreed)")
     s.add_argument("--force", action="store_true", help="test, rebuild and restart even when already up to date")
-    s.add_argument("--after-pull", metavar="COMMIT", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_update)
     s = sub.add_parser("config", help="get or set a setting: margin config set currency USD")
     s.add_argument("action", choices=["get", "set"])

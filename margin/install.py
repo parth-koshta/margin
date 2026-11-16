@@ -157,31 +157,32 @@ def step_command(dry: bool) -> Step:
     link = BIN_DIR / "margin"
     notes = []
     if link.is_symlink() and os.path.realpath(link) == str(target.resolve()):
-        status, text = "ok", f"The margin command: {link}"
+        status, text = "ok", f"The margin command: {health.tilde(link)}"
     elif link.exists() and not link.is_symlink():
-        return Step("command", "margin", "skipped", f"{link} exists and isn't a link to Margin, so it was left "
-                    f"alone. Use {target} instead, or move that file away and run margin setup again.")
+        return Step("command", "margin", "skipped", f"{health.tilde(link)} exists and isn't a link to Margin, so "
+                    f"it was left alone. Use {health.tilde(target)} instead, or move that file away and run margin "
+                    "setup again.")
     elif dry:
-        status, text = "would", f"Would link {link} to {target}"
+        status, text = "would", f"Would link {health.tilde(link)} to {health.tilde(target)}"
     else:
         BIN_DIR.mkdir(parents=True, exist_ok=True)
         if link.is_symlink():
             link.unlink()
         link.symlink_to(target)
-        status, text = "done", f"The margin command: {link} (open a new Terminal window to use it)"
+        status, text = "done", f"The margin command: {health.tilde(link)} (open a new Terminal window to use it)"
     rc = _rc_file()
     rc_text = rc.read_text() if rc.exists() else ""
     on_path = str(BIN_DIR) in os.environ.get("PATH", "").split(":") or ".local/bin" in rc_text
     if not on_path:
         if dry:
-            notes.append(f"Would add ~/.local/bin to the PATH in {rc}")
+            notes.append(f"Would add ~/.local/bin to the PATH in {health.tilde(rc)}")
         else:
             with open(rc, "a") as f:
                 f.write('\n# Margin: the margin command\nexport PATH="$HOME/.local/bin:$PATH"\n')
-            notes.append(f"Added ~/.local/bin to the PATH in {rc}")
+            notes.append(f"Added ~/.local/bin to the PATH in {health.tilde(rc)}")
     for line in rc_text.splitlines():
         if line.strip().startswith("alias margin=") and str(paths.PROJECT_DIR) not in line:
-            notes.append(f"{rc} has an older `alias margin=...` for another copy; it wins in Terminal until you "
+            notes.append(f"{health.tilde(rc)} has an older `alias margin=...` for another copy; it wins in Terminal until you "
                          "remove that line.")
     return Step("command", "margin", status, text, notes=notes)
 
@@ -190,14 +191,14 @@ def step_data(dry: bool) -> Step:
     if paths.SETTINGS_PATH.exists():
         if not dry:
             paths.ensure_data_dir()           # also puts the folder's permissions right (0700 / 0600)
-        return Step("data", "margin", "ok", f"Data folder and settings: {paths.DATA_DIR}")
+        return Step("data", "margin", "ok", f"Data folder and settings: {health.tilde(paths.DATA_DIR)}")
     if dry:
-        return Step("data", "margin", "would", f"Would create {paths.DATA_DIR} (only you can open it) with the "
-                    "default settings")
+        return Step("data", "margin", "would", f"Would create the private data folder {health.tilde(paths.DATA_DIR)} "
+                    "(only you can open it) with the default settings")
     from . import sync
     paths.ensure_data_dir()
     sync.load_settings()                       # writes every setting with its default
-    return Step("data", "margin", "done", f"Data folder and default settings: {paths.DATA_DIR}",
+    return Step("data", "margin", "done", f"Data folder and default settings: {health.tilde(paths.DATA_DIR)}",
                 notes=["Settings to choose (margin config set <key> <value>): currency (now "
                        f"{config.read().get('currency')}), self_names (your name as banks print it), read_sms, "
                        "misc_below, ai_sort / ai_review. AGENTS.md step 2 lists them all."])
@@ -220,7 +221,8 @@ def step_helpers(dry: bool) -> Step:
     if not stale:
         return Step("helpers", "margin", "ok", "PDF reader and Touch ID helper built")
     if dry:
-        return Step("helpers", "margin", "would", "Would build: " + ", ".join(stale))
+        return Step("helpers", "margin", "would", "Would build helper programs into the data folder's bin/: "
+                    + ", ".join(stale))
     failed = []
     for name, _, build in _helpers():
         if name in stale:
@@ -238,14 +240,15 @@ def step_schedule(dry: bool, install_schedule: Callable[[], int]) -> Step:
     if _ours(plist) and health._loaded(paths.LAUNCHD_LABEL):
         return Step("schedule", "margin", "ok", "Nightly sync scheduled (00:00)")
     if dry:
-        return Step("schedule", "margin", "would", "Would schedule the nightly 00:00 sync (launchd)")
+        return Step("schedule", "margin", "would", "Would add a LaunchAgent for the nightly 00:00 sync "
+                    f"({health.tilde(paths.LAUNCHD_PLIST)})")
     if health.sync_running():
         return Step("schedule", "margin", "skipped", "A sync is running; run margin setup again when it's done")
     old_python = (plist.get("ProgramArguments") or [""])[0]
     rc, out = _quietly(install_schedule)
     notes = [line for line in out if not line.startswith(("Scheduled", "For bank SMS"))]
     if old_python and old_python != health.python():
-        notes.append(f"The Python changed: give Full Disk Access to {health.python()} for bank texts.")
+        notes.append(f"The Python changed: give Full Disk Access to {health.tilde(health.python())} for bank texts.")
     if rc != 0:
         return Step("schedule", "margin", "failed", "Couldn't schedule the nightly sync", notes=notes)
     return Step("schedule", "margin", "done", "Nightly sync scheduled (00:00); a sleeping Mac runs it on waking",
@@ -258,13 +261,15 @@ def _app_ok(app_path: str) -> bool:
 
 def step_app(dry: bool, app_path: str, install_app: Callable[[], int]) -> Step:
     if _app_ok(app_path):
-        return Step("app", "margin", "ok", f"Margin app and page service: {app_path}, http://margin.localhost/")
+        return Step("app", "margin", "ok", f"Margin app and page service: {health.tilde(app_path)}, "
+                    "http://margin.localhost/")
     if dry:
-        return Step("app", "margin", "would", f"Would install the Margin app ({app_path}) and the page service")
+        return Step("app", "margin", "would", f"Would install the Margin app ({health.tilde(app_path)}) and a "
+                    f"LaunchAgent for the page service ({health.tilde(paths.WEB_PLIST)})")
     rc, out = _quietly(install_app)
     if rc != 0:
         return Step("app", "margin", "failed", "Couldn't install the Margin app", notes=out)
-    return Step("app", "margin", "done", f"Margin app and page service installed: {app_path}",
+    return Step("app", "margin", "done", f"Margin app and page service installed: {health.tilde(app_path)}",
                 notes=[line for line in out if not line.startswith("Margin app ready")])
 
 
@@ -282,7 +287,7 @@ def step_sms() -> Step:
     if health.check_sms(settings, (health.last_sync() or {}).get("sms"))["ok"]:
         return Step("sms", "you", "ok", "Bank texts readable by the nightly sync")
     return Step("sms", "you", "todo", "Bank texts: forwarding and Full Disk Access",
-                SMS_HOW.format(python=health.python()))
+                SMS_HOW.format(python=health.tilde(health.python())))
 
 
 def step_statements() -> Step:
@@ -293,7 +298,8 @@ def step_statements() -> Step:
         return Step("statements", "you", "skipped", "Statement passwords: not needed outside India "
                     "(other investments go in other_investments; see AGENTS.md step 2)")
     text = ("Statement passwords saved: " + ", ".join(have)) if have else "Statement passwords: none saved yet"
-    return Step("statements", "you", "optional", text, STATEMENTS_HOW.format(statements=paths.STATEMENTS_DIR))
+    return Step("statements", "you", "optional", text,
+                STATEMENTS_HOW.format(statements=health.tilde(paths.STATEMENTS_DIR)))
 
 
 def step_first_sync(dry: bool, no_sync: bool) -> Step:
@@ -375,44 +381,81 @@ def walk_statements(step: Step, prompts: dict) -> Step:
 
 
 # --- setup ---------------------------------------------------------------------------------------------------
+def _auto(dry: bool, app_path: str, install_app: Callable[[], int], install_schedule: Callable[[], int]) -> list:
+    return [step_command(dry), step_data(dry), step_helpers(dry), step_schedule(dry, install_schedule),
+            step_app(dry, app_path, install_app)]
+
+
+def _changes(steps: list[Step]) -> list[str]:
+    """What a dry run says setup would change on this Mac."""
+    out = []
+    for s in steps:
+        if s.status == "would" and s.text.startswith("Would "):
+            out.append(s.text[len("Would "):])
+        out += [n[len("Would "):] for n in s.notes if n.startswith("Would ")]
+    return out
+
+
 def setup(a, app_path: str, install_app: Callable[[], int], install_schedule: Callable[[], int],
           secret_prompts: dict) -> int:
-    dry = a.dry_run
+    """Changes nothing without a yes: --yes, or the person's answer in their own Terminal. Without one it reports
+    what it would change and what's waiting, like --dry-run."""
+    mac = step_mac()
+    if mac.status != "ok":
+        return _report(a, [mac], shown=0, interactive=False, dry=True, pending=[])
+    plan = _auto(True, app_path, install_app, install_schedule)
+    pending = _changes(plan)
+    if not a.no_sync and step_first_sync(True, False).status == "would":
+        pending.append("start the first sync in the background (it reads 12 months of mail; up to an hour)")
+    go = getattr(a, "yes", False) or not pending
+    if pending and not go and not a.dry_run and not a.json and _terminal():
+        print("Margin setup will:")
+        for c in pending:
+            print(f"  - {c}")
+        go = _yes("Go ahead?", default=True)
+        print()
+    dry = a.dry_run or not go
     interactive = not a.json and not dry and _terminal()
-    steps = [step_mac()]
-    if steps[0].status == "ok":
-        steps += [step_command(dry), step_data(dry), step_helpers(dry), step_schedule(dry, install_schedule),
-                  step_app(dry, app_path, install_app)]
-        if not a.json:
-            _print(steps, header=True)
-        person = [step_gmail(), step_sms(), step_statements()]
-        if interactive:
-            walked = []
-            for s in person:
-                if s.status == "todo" and s.id == "gmail":
-                    s = walk_gmail(s)
-                elif s.status == "todo" and s.id == "sms":
-                    s = walk_sms(s)
-                elif s.status == "optional" and s.id == "statements":
-                    s = walk_statements(s, secret_prompts)
-                walked.append(s)
-            person = walked
-        steps += person + [step_first_sync(dry, a.no_sync)]
-        shown = len(steps) - len(person) - 1
-    else:
-        shown = 0
+    steps = [mac] + (plan if dry else _auto(False, app_path, install_app, install_schedule))
+    if interactive:
+        _print(steps, header=True)
+    person = [step_gmail(), step_sms(), step_statements()]
+    if interactive:
+        walked = []
+        for s in person:
+            if s.status == "todo" and s.id == "gmail":
+                s = walk_gmail(s)
+            elif s.status == "todo" and s.id == "sms":
+                s = walk_sms(s)
+            elif s.status == "optional" and s.id == "statements":
+                s = walk_statements(s, secret_prompts)
+            walked.append(s)
+        person = walked
+    steps += person + [step_first_sync(dry, a.no_sync)]
+    shown = len(steps) - len(person) - 1 if interactive else 0
+    return _report(a, steps, shown, interactive, dry, pending if dry else [])
+
+
+def _report(a, steps: list[Step], shown: int, interactive: bool, dry: bool, pending: list[str]) -> int:
     waiting = [s.id for s in steps if s.status == "todo"]
     failed = [s.id for s in steps if s.status == "failed"]
+    needs_yes = bool(pending) and not a.dry_run
     if a.json:
-        print(json.dumps({"ok": not waiting and not failed, "waiting_on_you": waiting, "failed": failed,
-                          "steps": [s.as_dict() for s in steps]}, indent=2, ensure_ascii=False))
+        print(json.dumps({"ok": not waiting and not failed and not pending, "changed_nothing": dry,
+                          "needs_yes": needs_yes, "would_change": pending, "waiting_on_you": waiting,
+                          "failed": failed, "steps": [s.as_dict() for s in steps]}, indent=2, ensure_ascii=False))
     else:
         _print(steps[shown:], header=shown == 0, how=not interactive)
+        if needs_yes:
+            print("\nNothing was changed. Setup would: " + "; ".join(pending) + ".\nOnce the person agrees: "
+                  "margin setup --yes (or they run margin setup in their own Terminal, which asks).")
+        elif a.dry_run and pending:
+            print("\nDry run: nothing was changed.")
         if waiting:
             print(f"\nWaiting on you: {', '.join(waiting)}. Do the steps above, then run margin setup again.")
-        elif not failed and not dry:
+        elif not failed and not pending and not dry:
             print("\n" + AFTER)
-    return 1 if failed else EXIT_WAITING if waiting else 0
+    return 1 if failed else EXIT_WAITING if waiting or pending else 0
 
 
 def _print(steps: list[Step], header: bool = False, how: bool = True) -> None:
@@ -437,6 +480,7 @@ def run_tests() -> tuple[bool, str]:
     with tempfile.TemporaryDirectory(prefix="margin-update-") as tmp:
         env = dict(os.environ, MARGIN_DATA=os.path.join(tmp, "data"), MARGIN_DEMO_DATA=os.path.join(tmp, "demo"),
                    PYTHONPATH=str(paths.PROJECT_DIR))
+        env.pop(FINISH_ENV, None)
         r = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-t", "."],
                            cwd=str(paths.PROJECT_DIR), env=env, capture_output=True, text=True, timeout=1800)
     lines = (r.stderr or r.stdout).strip().splitlines()
@@ -450,54 +494,97 @@ def _other_agents() -> list[str]:
     return [p.name[:-len(".plist")] for p in found if p.name[:-len(".plist")] != paths.WEB_LABEL]
 
 
+FINISH_ENV = "MARGIN_UPDATE_FINISH"     # set only by update itself, for the half that runs on the new code
+
+
+def _incoming(target: str) -> list[str]:
+    out = _git("log", "--reverse", "--format=%h %s", f"HEAD..{target}").stdout
+    return [line for line in out.splitlines() if line.strip()]
+
+
 def update(a, app_path: str, install_app: Callable[[], int], install_schedule: Callable[[], int]) -> int:
+    """Fetch, show what's coming, and install exactly that only with a yes: `--to <commit>` (after the person saw
+    the list from --check) or their answer in their own Terminal."""
     if _git("rev-parse", "--is-inside-work-tree").stdout.strip() != "true":
-        print(f"{paths.PROJECT_DIR} isn't a git checkout, so Margin can't update itself. Get it with git clone "
-              "(README) and run margin setup there.")
+        print(f"{health.tilde(paths.PROJECT_DIR)} isn't a git checkout, so Margin can't update itself. Get it with "
+              "git clone (README) and run margin setup there.")
         return 1
+    finishing = os.environ.pop(FINISH_ENV, None)
+    if finishing is not None:
+        return _finish(finishing, app_path, install_app, install_schedule)
     branch = _git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
     if not upstream:
         print(f"This copy's branch ({branch}) doesn't follow a branch on GitHub, so there's nothing to update from.")
         return 1
-    if a.check:
-        if _git("fetch", "--quiet").returncode != 0:
-            print("Couldn't reach GitHub to check.")
-            return 1
-        behind = _git("rev-list", "--count", f"HEAD..{upstream}").stdout.strip() or "0"
-        print(f"{behind} new change{'s' if behind != '1' else ''} on {upstream}." +
-              (" Run margin update to get them." if behind != "0" else " Margin is up to date."))
-        return 0
-    if health.sync_running():
+    if not a.check and health.sync_running():
         print("A sync is running (margin sync shows it). Run margin update again when it's done.")
         return 1
-    if a.after_pull:                    # the second half, already running the new code
-        old, new = a.after_pull, _git("rev-parse", "HEAD").stdout.strip()
-    else:
-        old = _git("rev-parse", "HEAD").stdout.strip()
-        pull = _git("pull", "--ff-only", "--quiet")
-        if pull.returncode != 0:
-            why = (pull.stderr or pull.stdout).strip().splitlines()
-            print("Couldn't update by fast-forward, so nothing changed. This copy has commits or edits that aren't "
-                  f"on {upstream}; keep them on a branch, or ask for help.\n  git: {why[-1] if why else 'failed'}")
+    if _git("fetch", "--quiet").returncode != 0:
+        print("Couldn't reach GitHub, so nothing changed.")
+        return 1
+    head = _git("rev-parse", "HEAD").stdout.strip()
+    target = _git("rev-parse", upstream).stdout.strip()
+    if a.to:
+        target = _git("rev-parse", "--verify", "--quiet", f"{a.to}^{{commit}}").stdout.strip()
+        if not target or _git("merge-base", "--is-ancestor", target, upstream).returncode != 0:
+            print(f"{a.to} isn't a commit on {upstream}, so nothing changed. margin update --check lists what's new.")
             return 1
-        new = _git("rev-parse", "HEAD").stdout.strip()
-        if new == old and not a.force:
-            print(f"Margin is up to date ({new[:7]}).")
-            return 0
-        if new != old:
-            n = _git("rev-list", "--count", f"{old}..{new}").stdout.strip()
-            print(f"Got {n} change{'s' if n != '1' else ''}: {old[:7]} → {new[:7]}.", flush=True)
-            # This process still runs the old code: carry on in a fresh one, so the new code tests, builds and
-            # installs itself.
-            env = dict(os.environ, PYTHONPATH=str(paths.PROJECT_DIR))
-            os.chdir(paths.PROJECT_DIR)     # `python -m` looks in the current folder first
-            os.execve(sys.executable, [sys.executable, "-m", "margin", "update", "--after-pull", old], env)
+    if _git("merge-base", "--is-ancestor", head, target).returncode != 0:
+        print(f"Can't update by fast-forward, so nothing changed: this copy has commits that aren't on {upstream}. "
+              "Keep them on a branch, or ask for help. (Margin never merges.)")
+        return 1
+    commits = _incoming(target)
+    if not commits:
+        if a.force and not a.check:
+            return _after(None, head, app_path, install_app, install_schedule)
+        print(f"Margin is up to date ({head[:7]}).")
+        return 0
+    print(f"{len(commits)} new change{'s' if len(commits) != 1 else ''} on {upstream} ({head[:7]} → {target[:7]}):")
+    for line in commits[:40]:
+        print(f"  {line}")
+    if len(commits) > 40:
+        print(f"  … and {len(commits) - 40} more")
+    if a.check:
+        print(f"To install exactly these once the person agrees: margin update --to {target[:12]}")
+        return 0
+    if not a.to and not (_terminal() and _yes("Install them?")):
+        print(f"Nothing changed. To install exactly these once the person agrees: margin update --to {target[:12]}")
+        return EXIT_WAITING
+    merge = _git("merge", "--ff-only", "--quiet", target)
+    if merge.returncode != 0:
+        why = (merge.stderr or merge.stdout).strip().splitlines()
+        print(f"Couldn't fast-forward, so nothing changed.\n  git: {why[-1] if why else 'failed'}")
+        return 1
+    print(f"Got {len(commits)} change{'s' if len(commits) != 1 else ''}: {head[:7]} → {target[:7]}.", flush=True)
+    # This process still runs the old code: carry on in a fresh one, so the new code tests, builds and installs
+    # itself. It checks it's really the second half of this update (see _finish).
+    env = dict(os.environ, PYTHONPATH=str(paths.PROJECT_DIR), **{FINISH_ENV: head})
+    os.chdir(paths.PROJECT_DIR)     # `python -m` looks in the current folder first
+    os.execve(sys.executable, [sys.executable, "-m", "margin", "update"], env)
+    return 0                        # not reached
+
+
+def _finish(old: str, app_path: str, install_app: Callable[[], int], install_schedule: Callable[[], int]) -> int:
+    """The second half of an update, on the new code. Only right after update's own fast-forward: the commit it
+    came from must be HEAD's previous position in the reflog, and an ancestor of HEAD."""
+    new = _git("rev-parse", "HEAD").stdout.strip()
+    before = _git("rev-parse", "--verify", "--quiet", "HEAD@{1}").stdout.strip()
+    if not old or old == new or before != old or _git("merge-base", "--is-ancestor", old, new).returncode != 0:
+        print("This only runs as the second half of margin update, right after it fast-forwarded. Nothing changed; "
+              "run margin update.")
+        return 1
+    return _after(old, new, app_path, install_app, install_schedule)
+
+
+def _after(old: str | None, new: str, app_path: str, install_app: Callable[[], int],
+           install_schedule: Callable[[], int]) -> int:
+    """Test the code now checked out (going back to `old` if that fails), rebuild, reinstall, restart."""
     print("Running the tests (on a temporary folder)...", flush=True)
     ok, tail = run_tests()
     if not ok:
         print(tail)
-        if new != old:
+        if old:
             back = _git("reset", "--keep", old)
             print(f"The tests failed, so Margin went back to {old[:7]}." if back.returncode == 0 else
                   f"The tests failed and going back to {old[:7]} didn't work: {back.stderr.strip()}")
@@ -518,7 +605,7 @@ def update(a, app_path: str, install_app: Callable[[], int], install_schedule: C
         rc, out = _quietly(install_schedule)
         print("✓ Nightly sync reloaded" if rc == 0 else "✗ Couldn't reload the nightly sync:\n    " + "\n    ".join(out))
         if old_python and old_python != health.python():
-            print(f"    The Python changed: give Full Disk Access to {health.python()} for bank texts.")
+            print(f"    The Python changed: give Full Disk Access to {health.tilde(health.python())} for bank texts.")
     for label in _other_agents():
         if health._loaded(label):
             _run("launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}")

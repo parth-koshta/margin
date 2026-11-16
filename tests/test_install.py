@@ -83,6 +83,16 @@ class Config(unittest.TestCase):
         for key in config.known():
             with self.subTest(key=key):
                 self.assertIsNone(config.SECRET_KEY.search(key))
+                self.assertEqual(bool(config.PROGRAM_KEY.search(key)), key == "claude_path")
+
+    def test_programs_are_set_by_hand_only(self):
+        for key, value in (("claude_path", "/tmp/not-claude.sh"), ("fx_rates", '{"command": "x"}'),
+                           ("extra_categories", '{"out": [], "in": [], "hook": "x"}')):
+            with self.subTest(key=key):
+                rc, out = self.cfg("set", key, value)
+                self.assertEqual(rc, 1)
+                self.assertIn("by hand", out)
+        self.assertFalse(paths.SETTINGS_PATH.exists())
 
     def test_personal_settings_are_shown_only_as_counts(self):
         self.cfg("set", "self_names", "DEMO NAME")            # a plain string becomes a one-item list
@@ -91,6 +101,13 @@ class Config(unittest.TestCase):
         self.assertNotIn("DEMO NAME", out)
         self.assertNotIn("Some One", out)
         self.assertIn("about_me: set, 2 entries", out)
+        self.cfg("set", "trusted_senders", '["mybank.example"]')
+        self.cfg("set", "extra_categories", '{"out": ["Pets"], "in": ["Freelance", "Rent"]}')
+        rc, out = self.cfg("get")
+        self.assertNotIn("mybank.example", out)
+        self.assertNotIn("Pets", out)
+        self.assertIn("trusted_senders: set, 1 entry", out)
+        self.assertIn("extra_categories: set, 3 entries", out)
         self.assertIn("DEMO NAME", self.cfg("get", "self_names", "--show")[1])
 
     def test_get_writes_nothing(self):
@@ -136,11 +153,26 @@ class Doctor(unittest.TestCase):
         self.assertEqual(next(c for c in r["checks"] if c["id"] == "gmail")["ok"], False)
 
     def test_text_is_for_people(self):
-        with NO_KEYCHAIN, NOT_LOADED, mock.patch("margin.gmail.is_configured", return_value=False):
+        with NO_KEYCHAIN, NOT_LOADED, mock.patch("margin.gmail.is_configured", return_value=False), \
+                mock.patch.object(health, "person_watching", return_value=True):
             rc, out = _out(health.main, False, "/nonexistent/Margin.app")
         self.assertEqual(rc, 1)
         self.assertTrue(all(line.startswith(("✓", "✗", "    ·")) for line in out.splitlines()))
         self.assertIn("✗ Gmail not connected", out)
+        self.assertIn(self.PAYEE, out)                       # a person at their own terminal sees the details
+
+    def test_text_for_an_agent_or_a_pipe_counts_problems(self):
+        with NO_KEYCHAIN, NOT_LOADED, mock.patch("margin.gmail.is_configured", return_value=False):
+            rc, out = _out(health.main, False, "/nonexistent/Margin.app")
+        self.assertNotIn(self.PAYEE, out)
+        self.assertIn("3 problems (Statements 1, Gmail 1, Investments 1)", out)
+        line = f"2026-01-02 00:01:00 sync with problems in 9s: 3 emails | Statements: {self.PAYEE}.csv: no rows"
+        self.assertNotIn(self.PAYEE, health.screen_line(line))
+        self.assertIn("1 problem (margin doctor", health.screen_line(line))
+
+    def test_json_shows_the_home_folder_as_a_tilde(self):
+        rc, out = self.report()
+        self.assertNotIn(str(Path.home()) + "/", out)
 
     def test_a_mac_without_a_data_folder(self):
         missing = Path(tempfile.mkdtemp()) / "not-yet"
@@ -163,15 +195,16 @@ class Setup(unittest.TestCase):
         self.calls = []
 
     def args(self, **kw):
-        return argparse.Namespace(json=True, dry_run=False, no_sync=True, **kw)
+        return argparse.Namespace(**{"json": True, "dry_run": False, "no_sync": True, "yes": True, **kw})
 
-    def run_setup(self, a=None, mac_ok=True):
+    def run_setup(self, a=None, mac_ok=True, terminal=False):
         mac = install.Step("mac", "margin", "ok", "This Mac") if mac_ok else \
             install.Step("mac", "you", "todo", "This Mac is missing the Xcode command line tools", "xcode-select")
         app = lambda: self.calls.append("app") or 0          # noqa: E731
         schedule = lambda: self.calls.append("schedule") or 0     # noqa: E731
         with NO_KEYCHAIN, NOT_LOADED, NOT_SYNCING, \
                 mock.patch.object(install, "step_mac", return_value=mac), \
+                mock.patch.object(install, "_terminal", return_value=terminal), \
                 mock.patch.object(install, "BIN_DIR", self.tmp / "bin"), \
                 mock.patch.object(install, "_rc_file", return_value=self.tmp / ".zshrc"), \
                 mock.patch.object(install, "_helpers", return_value=[]), \
@@ -179,11 +212,18 @@ class Setup(unittest.TestCase):
             return _out(install.setup, a or self.args(), app_path=str(self.tmp / "Margin.app"), install_app=app,
                         install_schedule=schedule, secret_prompts={})
 
+    def assert_nothing_changed(self):
+        self.assertEqual(self.calls, [])
+        self.assertFalse(paths.SETTINGS_PATH.exists())
+        self.assertFalse((self.tmp / "bin").exists())
+        self.assertFalse((self.tmp / ".zshrc").exists())
+
     def test_does_its_part_and_waits_for_the_persons(self):
         rc, out = self.run_setup()
         r = json.loads(out)
         self.assertEqual(rc, install.EXIT_WAITING)
         self.assertEqual(r["waiting_on_you"], ["gmail", "sms"])
+        self.assertFalse(r["changed_nothing"])
         status = {s["id"]: s["status"] for s in r["steps"]}
         self.assertEqual((status["command"], status["data"], status["schedule"], status["app"]),
                          ("done", "done", "done", "done"))
@@ -192,10 +232,21 @@ class Setup(unittest.TestCase):
         self.assertEqual(os.path.realpath(self.tmp / "bin" / "margin"), str(paths.PROJECT_DIR / "margin-cli"))
         self.assertIn("Cmd-Shift-G", next(s for s in r["steps"] if s["id"] == "sms")["how"])
 
+    def test_without_a_yes_it_only_reports(self):
+        rc, out = self.run_setup(self.args(yes=False))
+        r = json.loads(out)
+        self.assertEqual(rc, install.EXIT_WAITING)
+        self.assertTrue(r["needs_yes"] and r["changed_nothing"])
+        changes = " ".join(r["would_change"])
+        for what in ("link", "PATH", "data folder", "LaunchAgent", "Margin app"):
+            self.assertIn(what, changes)
+        self.assert_nothing_changed()
+
     def test_safe_to_run_again(self):
         self.run_setup()
-        rc, out = self.run_setup()
-        status = {s["id"]: s["status"] for s in json.loads(out)["steps"]}
+        rc, out = self.run_setup(self.args(yes=False))
+        r = json.loads(out)
+        status = {s["id"]: s["status"] for s in r["steps"]}
         self.assertEqual((status["command"], status["data"]), ("ok", "ok"))
         self.assertEqual((self.tmp / ".zshrc").read_text().count(".local/bin"), 1)
 
@@ -207,21 +258,25 @@ class Setup(unittest.TestCase):
         self.assertEqual(next(s for s in r["steps"] if s["id"] == "statements")["status"], "skipped")
 
     def test_dry_run_changes_nothing(self):
-        rc, out = self.run_setup(argparse.Namespace(json=False, dry_run=True, no_sync=False))
+        rc, out = self.run_setup(self.args(json=False, dry_run=True, no_sync=False, yes=True))
         self.assertIn("Would", out)
-        self.assertEqual(self.calls, [])
-        self.assertFalse(paths.SETTINGS_PATH.exists())
-        self.assertFalse((self.tmp / "bin").exists())
-        self.assertFalse((self.tmp / ".zshrc").exists())
+        self.assertIn("Dry run: nothing was changed.", out)
+        self.assert_nothing_changed()
 
-    def test_in_their_own_terminal_it_waits_for_them(self):
-        answers = iter(["", "n"])           # Gmail: later; bank texts: they don't reach this Mac
-        with mock.patch.object(install, "_terminal", return_value=True), \
-                mock.patch.object(install, "_ask", side_effect=lambda prompt: next(answers)):
-            rc, out = self.run_setup(argparse.Namespace(json=False, dry_run=False, no_sync=True))
+    def test_in_their_own_terminal_it_asks_then_waits_for_them(self):
+        answers = iter(["", "", "n"])       # go ahead: yes; Gmail: later; bank texts: they don't reach this Mac
+        with mock.patch.object(install, "_ask", side_effect=lambda prompt: next(answers)):
+            rc, out = self.run_setup(self.args(json=False, yes=False), terminal=True)
+        self.assertIn("Margin setup will:", out)
         self.assertEqual(rc, install.EXIT_WAITING)
         self.assertIn("Waiting on you: gmail.", out)
         self.assertIs(json.loads(paths.SETTINGS_PATH.read_text())["read_sms"], False)
+
+    def test_in_their_own_terminal_no_means_no(self):
+        with mock.patch.object(install, "_ask", return_value="n"):
+            rc, out = self.run_setup(self.args(json=False, yes=False), terminal=True)
+        self.assertIn("Nothing was changed", out)
+        self.assert_nothing_changed()
 
     def test_stops_when_the_mac_needs_the_command_line_tools(self):
         rc, out = self.run_setup(mac_ok=False)
@@ -235,6 +290,9 @@ class Setup(unittest.TestCase):
         status = {s["id"]: s["status"] for s in json.loads(self.run_setup()[1])["steps"]}
         self.assertEqual(status["command"], "skipped")
         self.assertEqual((self.tmp / "bin" / "margin").read_text(), "#!/bin/sh\n")
+
+    def test_shows_the_home_folder_as_a_tilde(self):
+        self.assertNotIn(str(Path.home()) + "/", self.run_setup(self.args(yes=False))[1])
 
 
 def _git(cwd, *args):
@@ -259,20 +317,29 @@ class Update(unittest.TestCase):
         subprocess.run(["git", "clone", "-q", str(self.origin), str(self.copy)], check=True, capture_output=True)
         self.calls = []
 
-    def commit(self, repo, name):
+    def commit(self, repo, name, push=False):
         (repo / f"{name}.txt").write_text(name + "\n")
         _git(repo, "add", "-A")
         _git(repo, "commit", "-q", "-m", name)
+        if push:
+            _git(repo, "push", "-q", "origin", "HEAD:main")
         return _git(repo, "rev-parse", "HEAD")
 
-    def update(self, tests_pass=True, **kw):
-        a = argparse.Namespace(**{"check": False, "force": False, "after_pull": None, **kw})
+    def head(self):
+        return _git(self.copy, "rev-parse", "HEAD")
+
+    def update(self, tests_pass=True, finishing=None, terminal=False, answer="", **kw):
+        a = argparse.Namespace(**{"check": False, "force": False, "to": None, **kw})
+        env = {install.FINISH_ENV: finishing} if finishing else {}
         with mock.patch.object(paths, "PROJECT_DIR", self.copy), NOT_SYNCING, NOT_LOADED, \
                 mock.patch.object(paths, "LAUNCHD_PLIST", self.tmp / "none.plist"), \
                 mock.patch.object(paths, "WEB_PLIST", self.tmp / "none.web.plist"), \
                 mock.patch.object(install, "run_tests", return_value=(tests_pass, "FAILED (failures=1)")), \
                 mock.patch.object(install, "step_helpers", return_value=install.Step("helpers", "margin", "ok", "ok")), \
-                mock.patch("os.chdir"), mock.patch("os.execve", side_effect=lambda *x: self.calls.append(x[1])):
+                mock.patch.object(install, "_terminal", return_value=terminal), \
+                mock.patch.object(install, "_ask", return_value=answer), \
+                mock.patch.dict(os.environ, env), mock.patch("os.chdir"), \
+                mock.patch("os.execve", side_effect=lambda exe, argv, env: self.calls.append((argv, env))):
             return _out(install.update, a, app_path=str(self.tmp / "none.app"),
                         install_app=lambda: self.calls.append("app") or 0,
                         install_schedule=lambda: self.calls.append("schedule") or 0)
@@ -282,48 +349,88 @@ class Update(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("up to date", out)
 
-    def test_check_says_how_many(self):
+    def test_check_lists_whats_coming_and_changes_nothing(self):
+        old = self.head()
         self.commit(self.other, "second")
-        _git(self.other, "push", "-q", "origin", "HEAD:main")
+        new = self.commit(self.other, "third", push=True)
         rc, out = self.update(check=True)
-        self.assertIn("1 new change", out)
-        self.assertNotEqual(_git(self.copy, "rev-parse", "HEAD"), _git(self.other, "rev-parse", "HEAD"))
+        self.assertEqual(rc, 0)
+        self.assertIn("2 new changes", out)
+        self.assertIn(" second", out)
+        self.assertIn(" third", out)
+        self.assertIn(f"margin update --to {new[:12]}", out)
+        self.assertEqual(self.head(), old)
 
-    def test_pulls_then_finishes_on_the_new_code(self):
-        old = _git(self.copy, "rev-parse", "HEAD")
-        new = self.commit(self.other, "second")
-        _git(self.other, "push", "-q", "origin", "HEAD:main")
+    def test_without_a_go_ahead_nothing_changes(self):
+        old = self.head()
+        self.commit(self.other, "second", push=True)
         rc, out = self.update()
-        self.assertEqual(_git(self.copy, "rev-parse", "HEAD"), new)
-        self.assertEqual(self.calls[-1][-2:], ["--after-pull", old])
-        rc, out = self.update(after_pull=old)                 # what the fresh process does
+        self.assertEqual(rc, install.EXIT_WAITING)
+        self.assertIn("Nothing changed", out)
+        self.assertEqual(self.head(), old)
+        rc, out = self.update(terminal=True, answer="n")      # the person says no in their own Terminal
+        self.assertEqual(self.head(), old)
+        self.assertEqual(self.calls, [])
+
+    def test_installs_exactly_what_was_shown_then_finishes_on_the_new_code(self):
+        old = self.head()
+        shown = self.commit(self.other, "second", push=True)
+        self.commit(self.other, "arrived later", push=True)  # after the person saw the list
+        rc, out = self.update(to=shown[:12])
+        self.assertEqual(self.head(), shown)
+        argv, env = self.calls[-1]
+        self.assertEqual(argv[-3:], ["-m", "margin", "update"])
+        self.assertEqual(env[install.FINISH_ENV], old)
+        rc, out = self.update(finishing=old)                   # what the fresh process does
         self.assertEqual(rc, 0)
         self.assertIn("Tests passed", out)
         self.assertIn("Your data wasn't touched", out)
 
+    def test_a_yes_in_their_own_terminal(self):
+        new = self.commit(self.other, "second", push=True)
+        self.update(terminal=True, answer="y")
+        self.assertEqual(self.head(), new)
+
+    def test_the_second_half_only_right_after_the_first(self):
+        old = self.head()
+        self.commit(self.other, "second", push=True)
+        rc, out = self.update(finishing=old)                   # nothing was fast-forwarded by this run
+        self.assertEqual(rc, 1)
+        self.assertIn("only runs as the second half", out)
+        self.update(to="origin/main")
+        rc, out = self.update(finishing="0" * 40)              # not where HEAD came from
+        self.assertEqual(rc, 1)
+        self.assertNotIn("app", self.calls)
+
     def test_failing_tests_go_back(self):
-        old = _git(self.copy, "rev-parse", "HEAD")
-        self.commit(self.other, "broken")
-        _git(self.other, "push", "-q", "origin", "HEAD:main")
-        self.update()
-        rc, out = self.update(tests_pass=False, after_pull=old)
+        old = self.head()
+        self.commit(self.other, "broken", push=True)
+        self.update(to="origin/main")
+        rc, out = self.update(tests_pass=False, finishing=old)
         self.assertEqual(rc, 1)
         self.assertIn("went back", out)
-        self.assertEqual(_git(self.copy, "rev-parse", "HEAD"), old)
+        self.assertEqual(self.head(), old)
         self.assertNotIn("app", self.calls)
+
+    def test_only_commits_from_upstream(self):
+        old = self.head()
+        stray = self.commit(self.other, "never pushed")
+        rc, out = self.update(to=stray[:12])
+        self.assertEqual(rc, 1)
+        self.assertIn("isn't a commit on", out)
+        self.assertEqual(self.head(), old)
 
     def test_never_merges(self):
         mine = self.commit(self.copy, "local change")
-        self.commit(self.other, "upstream change")
-        _git(self.other, "push", "-q", "origin", "HEAD:main")
-        rc, out = self.update()
+        self.commit(self.other, "upstream change", push=True)
+        rc, out = self.update(to="origin/main")
         self.assertEqual(rc, 1)
         self.assertIn("fast-forward", out)
-        self.assertEqual(_git(self.copy, "rev-parse", "HEAD"), mine)
+        self.assertEqual(self.head(), mine)
 
     def test_waits_for_a_running_sync(self):
         with mock.patch.object(health, "sync_running", return_value=True):
-            a = argparse.Namespace(check=False, force=False, after_pull=None)
+            a = argparse.Namespace(check=False, force=False, to=None)
             with mock.patch.object(paths, "PROJECT_DIR", self.copy):
                 rc, out = _out(install.update, a, app_path="", install_app=None, install_schedule=None)
         self.assertEqual(rc, 1)
@@ -335,12 +442,13 @@ class Update(unittest.TestCase):
         def fake_run(cmd, cwd, env, **kw):
             seen.update(env)
             return subprocess.CompletedProcess(cmd, 0, "", "OK")
-        with mock.patch("subprocess.run", side_effect=fake_run):
+        with mock.patch("subprocess.run", side_effect=fake_run), mock.patch.dict(os.environ, {install.FINISH_ENV: "x"}):
             ok, _ = install.run_tests()
         self.assertTrue(ok)
         self.assertNotEqual(seen["MARGIN_DATA"], str(paths.DATA_DIR))
         self.assertTrue(seen["MARGIN_DATA"].startswith(os.path.realpath(tempfile.gettempdir()))
                         or seen["MARGIN_DATA"].startswith(tempfile.gettempdir()))
+        self.assertNotIn(install.FINISH_ENV, seen)
 
 
 if __name__ == "__main__":

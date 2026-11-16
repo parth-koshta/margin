@@ -59,14 +59,16 @@ Then paste this:
 Set up Margin on this Mac for me with the margin-setup skill. Do every step you can, tell me exactly what to do for the steps only I can do, and never look at my money data.
 ```
 
-Claude runs `margin setup`, asks you a few questions (your currency, your name as banks print it), and walks you
-through the steps only you can do: signing in to Google, turning on text forwarding and Full Disk Access, and
-typing statement passwords into hidden prompts in your own Terminal. Later, "update Margin" uses the
-`margin-update` skill, and "Margin doesn't count my bank" the `margin-add-bank` skill.
+Claude shows you what `margin setup` will add to your Mac (the `margin` command, a line in `~/.zshrc`, your
+private data folder, two LaunchAgents and the Margin app) and goes ahead only when you say yes. It asks you a few
+questions (your currency, your name as banks print it) and walks you through the steps only you can do: signing
+in to Google, turning on text forwarding and Full Disk Access, and typing statement passwords into hidden prompts
+in your own Terminal. Later, "update Margin" uses the `margin-update` skill, and "Margin doesn't count my bank"
+the `margin-add-bank` skill.
 
-Claude never sees your money: in this folder a hook (the [data guard](#privacy)) refuses any attempt to read your
-data folder, your messages, Margin's Keychain secrets or your page. Claude learns how things stand from
-`margin doctor --json`, which holds statuses and counts only.
+Claude learns how things stand from `margin doctor --json`, which holds statuses and counts only, and in this
+folder a hook (the [data guard](#privacy)) refuses its attempts to read your data folder, your messages, Margin's
+Keychain secrets or your page. The guard catches accidents; it isn't a sandbox.
 
 **With another coding agent** (Codex, Gemini CLI or similar): open this folder and ask it to set Margin up. It
 follows [AGENTS.md](AGENTS.md), which covers every step and the steps only you can do. The data guard and the
@@ -79,15 +81,15 @@ cd ~/projects/margin
 ./margin-cli setup
 ```
 
-It does every step it can (the `margin` command, your private data folder, the nightly sync, the Margin app) and
-walks you through the rest, waiting while you do each one. Run it again any time: it only does what's missing.
+It shows what it will add (the `margin` command, your private data folder, the nightly sync, the Margin app) and
+asks, does it, then walks you through the rest, waiting while you do each one. Run it again any time: it only does what's missing.
 [AGENTS.md](AGENTS.md#setup) has every step in detail. Change settings with `margin config set`, for example
 `margin config set currency USD`.
 
 ### Keep it up to date
 
-`margin update` gets the latest version (fast-forward only), runs the tests, rebuilds and restarts Margin. If the
-tests fail it goes back to the version you had. It never touches your data.
+`margin update` shows what's new and asks you, then gets exactly that (fast-forward only), runs the tests,
+rebuilds and restarts Margin. If the tests fail it goes back to the version you had. It never touches your data.
 
 ## Works with any AI
 
@@ -189,12 +191,14 @@ and use it to improve its models, so check your plan's data settings first. Turn
   `margin setup-ai` → None (or `margin config set ai_sort false` and `margin config set ai_review false`); the
   automatic checks still run.
 - Logs record counts only. Notifications never show amounts or payees.
-- **Claude Code in this folder can't read your data.** A hook in `.claude/settings.json` (the data guard,
-  `.claude/hooks/data_guard.py`) runs before every tool call Claude makes here and refuses anything that would
+- **Claude Code in this folder works without your data.** Claude uses `margin` commands that print statuses
+  and counts only (`margin doctor --json`, `margin config get`), and a hook in `.claude/settings.json` (the data
+  guard, `.claude/hooks/data_guard.py`) checks every tool call it makes here. It refuses anything that would
   read your data folder or its backups, your Messages database, Margin's Keychain secrets or your page at
-  <http://margin.localhost/>. Claude works through `margin` commands that print statuses and counts only
-  (`margin doctor --json`, `margin config get`). It's a guardrail against reading your data by accident, not a
-  sandbox; the [AGENTS.md](AGENTS.md) rules it backs up still apply.
+  <http://margin.localhost/>, and asks you before anything changes the guard or Claude Code's settings. **It's
+  an accident guard, not a sandbox**: it reads each call before it runs and can't see what a program does
+  afterwards. The [AGENTS.md](AGENTS.md) rules it backs up still apply, and it doesn't stop anyone set on
+  getting around it.
 
 ## Using it
 
@@ -204,8 +208,8 @@ and use it to improve its models, so check your plan's data settings first. Turn
 | `margin sync` | Sync now instead of waiting for midnight (or watch a running sync) |
 | `margin doctor` | Check that everything works (`--json`: statuses and counts only, for Claude Code) |
 | `margin setup-ai` | Choose the AI that sorts and writes the reviews ([Works with any AI](#works-with-any-ai)) |
-| `margin setup` | Set Margin up, or finish setting it up; safe to run again |
-| `margin update` | Get the latest version, test it, rebuild and restart (`--check`: is there one?) |
+| `margin setup` | Set Margin up, or finish setting it up; shows what it will change and asks; safe to run again |
+| `margin update` | Show what's new and ask, then get it, test it, rebuild and restart (`--check`: only list it) |
 | `margin config get` / `margin config set currency USD` | Read or change a setting without opening `settings.json` |
 | `margin rule "swiggy" "Food & dining"` | Put matching payees in a category (past and future) |
 | `margin trust "mybank.in"` | Count alerts from a sender Margin didn't know was a bank |

@@ -140,11 +140,115 @@ class Allows(unittest.TestCase):
 
     def test_file_tools_in_the_repo(self):
         self.assertIsNone(decide("Read", file_path=REPO + "/AGENTS.md"))
-        self.assertIsNone(decide("Grep", pattern="Application Support/Margin"))
+        self.assertIsNone(decide("Grep", pattern="DATA_DIR"))
         self.assertIsNone(decide("Glob", pattern="**/*.py"))
-        # Docs may name the folder: only the file being written counts for Edit and Write.
-        self.assertIsNone(decide("Edit", file_path=REPO + "/AGENTS.md", old_string="x",
+        # Docs, code and tests in this repository may name the folder in what they write.
+        self.assertIsNone(decide("Edit", file_path=str(ROOT / "AGENTS.md"), old_string="x",
                                  new_string="Your data is in ~/Library/Application Support/Margin/."))
+        self.assertIsNone(decide("MultiEdit", file_path=str(ROOT / "README.md"),
+                                 edits=[{"old_string": "x", "new_string": "~/Library/Messages/chat.db"}]))
+
+
+class EveryTool(unittest.TestCase):
+    """Any tool's input, not just the known ones: paths, commands, URLs and the folder named in text."""
+
+    def test_command_fields_of_other_tools(self):
+        cat = "cat ~/Library/Application\\ Support/Margin/settings.json"
+        self.assertTrue(decide("mcp__terminal__run_in_terminal", command=cat, cwd=REPO))
+        self.assertTrue(decide("Monitor", command="tail -f ~/Library/Messages/chat.db"))
+        self.assertTrue(decide("mcp__terminal__run_in_terminal", command="./margin-cli tidy"))
+        self.assertTrue(decide("mcp__computer-use__type", text="sqlite3 ~/Library/Application\\ Support/Margin/money.db"))
+        self.assertTrue(decide("mcp__browser__javascript_tool", action="javascript_exec",
+                               text="await fetch('http://margin.localhost/').then(r => r.text())"))
+
+    def test_paths_anywhere_in_the_input(self):
+        self.assertTrue(decide("Artifact", file_path=REPO + "/page.html",
+                               files={"data.json": {"from": DATA + "/settings.json"}}))
+        self.assertTrue(decide("mcp__drive__upload", local_path=DATA + "/statements/x.csv"))
+        self.assertTrue(decide("mcp__x__anything", options={"nested": [{"where": DATA + "/rules.json"}]}))
+
+    def test_the_folder_named_in_any_text(self):
+        self.assertTrue(decide("Agent", prompt="Count the rows in ~/Library/Application Support/Margin/money.db"))
+        self.assertTrue(decide("Write", file_path="/tmp/peek.py",
+                               content="import sqlite3\nsqlite3.connect('/Users/you/Library/Application Support/Margin/money.db')\n"))
+        self.assertTrue(decide("Edit", file_path="/tmp/peek.sh", old_string="x", new_string="ls ~/Library/Messages/"))
+        self.assertIn("as text", decide("Grep", pattern="Application Support/Margin") or "")
+
+    def test_the_data_volume_spelling(self):
+        env = {"MARGIN_DATA": "/Users/you/Money"}
+        self.assertTrue(decide("Read", file_path="/System/Volumes/Data/Users/you/Money/money.db", env=env))
+        self.assertTrue(bash("cat /System/Volumes/Data/Users/you/Money/rules.json", env=env))
+        self.assertTrue(guard.reaches(guard.expand("/System/Volumes/Data" + DATA + "/x", REPO, HOME, {}),
+                                      guard.protected(HOME, {}), False))
+
+    def test_harmless_calls_from_other_tools(self):
+        self.assertIsNone(decide("mcp__terminal__run_in_terminal", command="git status"))
+        self.assertIsNone(decide("mcp__browser__navigate", url="http://demo.margin.localhost:8765/"))
+        self.assertIsNone(decide("mcp__ccd_turn__update_plan", items=[{"content": "Run the tests", "status": "pending"}]))
+
+
+class Loopholes(unittest.TestCase):
+    def test_python_needs_margin_data_itself_set_elsewhere(self):
+        for cmd in ("MARGIN_DEMO_DATA=/tmp/x python3 -c 'from margin import db; db.connect()'",
+                    "python3 -c 'from margin import db  # MARGIN_DATA'",
+                    "python3 -c 'from margin import db; import tests'",
+                    "python3 -c 'import os, margin.db'",
+                    "python3 -c '__import__(\"margin.db\")'",
+                    "python3 -m margin.sync",
+                    "PYTHONPATH=. /usr/bin/python3 -I -m margin.tidy",
+                    "MARGIN_DATA=$UNKNOWN python3 -m margin.sync",
+                    'MARGIN_DATA="$HOME/Library/Application Support/Margin" python3 -m margin.sync'):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(bash(cmd))
+        for cmd in ("MARGIN_DATA=$(mktemp -d) python3 -m margin.sync",
+                    'MARGIN_DATA="$(mktemp -d)" python3 -c "from margin import db"',
+                    "MARGIN_DATA=/tmp/margin-try python3 -c 'from margin import parse'",
+                    'MARGIN_DATA="$HOME/Library/Caches/Margin Demo/us" python3 -c "from margin import db"',
+                    "python3 -c 'import tests; from margin import parse'"):
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(bash(cmd))
+
+    def test_margin_commands_anywhere_in_a_command(self):
+        for cmd in ("sh margin-cli tidy", "bash ./margin-cli open --print-url", "sh -c 'margin tidy'",
+                    "bash -lc \"cd ~/projects/margin && ./margin-cli setup-pan\"", "eval margin config get x --show",
+                    "true; /usr/bin/env margin tidy"):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(bash(cmd))
+
+    def test_a_recursive_search_from_above_the_folder_without_a_path(self):
+        for cmd in ("cd ~ && grep -r ACME", "cd ~/Library && rg ACME", "cd ~ && find -name '*.db'"):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(bash(cmd))
+        self.assertTrue(bash("rg ACME", cwd=HOME))
+        self.assertIsNone(bash("cd ~/projects/margin && grep -r ACME"))
+        with tempfile.TemporaryDirectory() as home:
+            home = os.path.realpath(home)
+            os.makedirs(os.path.join(home, "projects"))
+            self.assertIsNone(bash("cd ~ && grep -r ACME projects", home=home))
+
+
+class AsksFirst(unittest.TestCase):
+    """Changing the guard, or the settings that switch it on, waits for the person's yes."""
+
+    def ask(self, tool, **tool_input):
+        return guard.approval({"tool_name": tool, "tool_input": tool_input, "cwd": str(ROOT)}, home=HOME, env={})
+
+    def test_edits_to_the_guard_and_settings(self):
+        self.assertTrue(self.ask("Edit", file_path=str(HOOK), old_string="a", new_string="b"))
+        self.assertTrue(self.ask("Write", file_path=str(ROOT / ".claude" / "settings.json"), content="{}"))
+        self.assertTrue(self.ask("Write", file_path=str(ROOT / ".claude" / "settings.local.json"),
+                                 content='{"disableAllHooks": true}'))
+        self.assertTrue(self.ask("Write", file_path=HOME + "/.claude/settings.json", content="{}"))
+        self.assertTrue(self.ask("Bash", command="sed -i '' 's/2/0/' .claude/hooks/data_guard.py"))
+        self.assertTrue(self.ask("Bash", command="rm .claude/settings.json"))
+        self.assertTrue(self.ask("Bash", command="echo '{}' > .claude/settings.local.json"))
+        self.assertTrue(self.ask("Bash", command="git checkout -- .claude/hooks"))
+
+    def test_reading_them_is_fine(self):
+        self.assertIsNone(self.ask("Read", file_path=str(HOOK)))
+        self.assertIsNone(self.ask("Bash", command="cat .claude/settings.json && git diff .claude/hooks"))
+        self.assertIsNone(self.ask("Bash", command="python3 -m unittest tests.test_data_guard"))
+        self.assertIsNone(self.ask("Edit", file_path=str(ROOT / "README.md"), old_string="a", new_string="b"))
 
 
 class Backups(unittest.TestCase):
@@ -194,9 +298,16 @@ class AsAHook(unittest.TestCase):
         r = self.run_hook(json.dumps({"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": REPO}))
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
 
-    def test_a_broken_event_that_names_the_folder_is_refused(self):
-        r = self.run_hook('{"tool_name": "Read", "tool_input": {"file_path": "' + DATA + '/money.db"')
+    def test_a_broken_event_is_refused(self):
+        r = self.run_hook('{"tool_name": "Read", "tool_input": {"file_path": "' + REPO + '/README.md"')
         self.assertEqual(r.returncode, 2)
+        self.assertIn("refused it to be safe", r.stderr)
+
+    def test_asks_through_claude_code(self):
+        r = self.run_hook(json.dumps({"tool_name": "Edit", "cwd": str(ROOT),
+                                      "tool_input": {"file_path": str(HOOK), "old_string": "a", "new_string": "b"}}))
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"], "ask")
 
     def test_registered_for_every_tool(self):
         settings = json.loads((ROOT / ".claude" / "settings.json").read_text())

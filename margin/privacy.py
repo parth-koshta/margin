@@ -8,8 +8,10 @@ Two layers:
   home folder, your git email, and anything you list in private-words.txt in the data folder (employer, family).
 - General patterns that work on any machine (and in CI): PAN-shaped codes, Indian mobile numbers, personal email
   addresses, /Users/<name> paths, API keys and private keys, and files that must never be committed (statements,
-  PDFs, databases, settings.json, rules.json, server.key, client_secret*.json). Images and videos are allowed only
-  in docs/media/ (captured from `margin demo`).
+  PDFs, databases, Margin's settings.json, rules.json, server.key, client_secret*.json). The one settings.json
+  that may be committed is Claude Code's project settings, .claude/settings.json (the data guard hook), and only
+  while it holds nothing but Claude Code settings. Images and videos are allowed only in docs/media/ (captured
+  from `margin demo`).
 
 It reports file:line and WHAT kind of detail matched, never the value itself, so its output is safe to show anywhere.
 A line can opt out of the general patterns (not of your own details) with the marker "privacy: ok" and a reason.
@@ -35,6 +37,13 @@ NEVER_FILES = re.compile(r"(^|/)(statements/|.*\.pdf$|.*\.db$|.*\.db-\w+$|.*\.sq
                          r".*\.mbox$|.*\.eml$|chat\.db|assets\.csv$|private-words\.txt$)", re.I)
 MEDIA = re.compile(r"\.(png|jpe?g|gif|webp|heic|mov|mp4|m4v|webm)$", re.I)
 CLAUDE_SETTINGS = ".claude/settings.json"   # Claude Code's project settings (the data guard hook): code, not data
+# Its allowed top-level keys: Claude Code's own settings. Margin's settings.json (currency, self_names, ...) copied
+# to that path has other keys, so it's refused like any other settings.json.
+CLAUDE_KEYS = {"$schema", "hooks", "permissions", "env", "model", "statusLine", "outputStyle", "includeCoAuthoredBy",
+               "cleanupPeriodDays", "disableAllHooks", "enableAllProjectMcpServers", "enabledMcpjsonServers",
+               "disabledMcpjsonServers", "enabledPlugins", "extraKnownMarketplaces", "spinnerTipsEnabled",
+               "alwaysThinkingEnabled", "sandbox", "respectGitignore", "attribution", "companyAnnouncements",
+               "forceLoginMethod", "apiKeyHelper"}
 TEXT_LIMIT = 2_000_000
 COMMON = {"payout", "payouts", "cashback", "autopay", "netbanking", "upi", "emi", "sip", "neft", "imps", "rtgs",
           "nach", "ecs", "atm", "pos", "ecom", "billpay", "recharge", "fastag", "forex", "petrol", "salary"}
@@ -307,7 +316,7 @@ def _files_at(commit: str) -> list[tuple[str, bytes]]:
 def scan(files: list[tuple[str, bytes]], mine: Personal | None) -> list[str]:
     problems = []
     for name, blob in files:
-        if NEVER_FILES.search(name) and name != CLAUDE_SETTINGS:      # it's still scanned line by line below
+        if NEVER_FILES.search(name) and not (name == CLAUDE_SETTINGS and claude_settings(blob)):
             problems.append(f"{name}: this kind of file must never be committed (private data)")
             continue
         if MEDIA.search(name):
@@ -319,6 +328,16 @@ def scan(files: list[tuple[str, bytes]], mine: Personal | None) -> list[str]:
             continue
         problems += scan_text(name, blob.decode("utf-8", "replace"), mine)
     return problems
+
+
+def claude_settings(blob: bytes) -> bool:
+    """Is this Claude Code's settings file (JSON with only Claude Code's keys)? Then it's scanned line by line like
+    code instead of refused."""
+    try:
+        data = json.loads(blob.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return isinstance(data, dict) and bool(data) and set(data) <= CLAUDE_KEYS
 
 
 def scan_text(name: str, text: str, mine: Personal | None) -> list[str]:

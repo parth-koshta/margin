@@ -43,7 +43,8 @@ def load_settings() -> dict:
 
 def _log(msg: str) -> None:
     line = f"{datetime.now():%Y-%m-%d %H:%M:%S} {msg}"
-    print(line)
+    from .health import screen_line
+    print(screen_line(line))         # the file below keeps the details; the screen gets them only at a terminal
     with open(paths.LOG_DIR / "sync.log", "a") as f:
         f.write(line + "\n")
 

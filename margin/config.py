@@ -3,7 +3,9 @@
 Personal settings (names, balances, holdings, facts about you) are never printed by default: `get` says whether
 they're set and how many entries they have. `--show` prints them, for the person in their own Terminal (Claude
 Code's data guard refuses --show). Secrets are refused outright: they belong in the Keychain, through the hidden
-prompts of `margin setup-pan`, `setup-pran`, `setup-ppf` and `setup-gmail`.
+prompts of `margin setup-pan`, `setup-pran`, `setup-ppf` and `setup-gmail`. So are settings that name a program
+(claude_path and the like): the nightly sync would run it with prompts built from the person's money data, so
+only the person sets those, by hand in settings.json.
 """
 from __future__ import annotations
 
@@ -17,7 +19,9 @@ from . import paths
 OPTIONAL = {"lock_minutes": (int, float), "other_investments": list, "us_snapshot": dict, "ppf": list}
 # Their values describe the person (names, money, facts): shown only as "set, N entries" unless --show.
 PERSONAL = {"self_names", "about_me", "other_investments", "us_snapshot", "ppf", "old_hostnames", "ignored_senders",
-            "project_categories"}
+            "project_categories", "trusted_senders", "extra_categories"}
+# Settings naming a program the nightly sync runs (with prompts built from money data): set by hand only.
+PROGRAM_KEY = re.compile(r"(?i)path|command|cmd|exe|binary|program|script|hook|shell")
 SECRET_KEY = re.compile(r"(?i)^(pan|pran)$|pan_|_pan$|pran|password|passwd|passcode|secret|token|ppf_statement|"
                         r"api_?key|private_?key|aadhaar|ssn")
 SECRET_VALUE = [
@@ -116,6 +120,19 @@ def parse_value(key: str, text: str):
     return value
 
 
+def _program_keys(value) -> bool:
+    if isinstance(value, dict):
+        return any(PROGRAM_KEY.search(str(k)) or _program_keys(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_program_keys(v) for v in value)
+    return False
+
+
+PROGRAM_HINT = ("That setting names a program the nightly sync runs, with prompts built from the person's money "
+                "data, so it can't be set from here. The person sets it by hand in settings.json if they need to; "
+                "left empty, Margin finds Claude Code by itself.")
+
+
 def check_key(key: str) -> None:
     if SECRET_KEY.search(key):
         raise Refused(secret_hint(key))
@@ -125,11 +142,15 @@ def check_key(key: str) -> None:
 
 def set_value(key: str, text: str) -> object:
     check_key(key)
+    if PROGRAM_KEY.search(key):
+        raise Refused(PROGRAM_HINT)
     for what, rx in SECRET_VALUE:
         if rx.search(text):
             raise Refused(f"That value looks like {what}. Secrets go in the Keychain through margin's setup-* "
                           "commands (hidden prompts), never in settings.json.")
     value = parse_value(key, text)
+    if _program_keys(value):
+        raise Refused(PROGRAM_HINT)
     paths.ensure_data_dir()
     try:
         saved = json.loads(paths.SETTINGS_PATH.read_text())
@@ -147,17 +168,25 @@ def set_value(key: str, text: str) -> object:
     return value
 
 
+def size(value) -> int:
+    """How many entries a setting has: list items; for {"out": [...], "in": [...]} or {"holdings": {...}}, what's
+    inside."""
+    if isinstance(value, list):
+        return len(value)
+    if isinstance(value, dict):
+        inner = [v for v in value.values() if isinstance(v, (list, dict))]
+        return sum(len(v) for v in inner) if inner else len(value)
+    return 0 if value in (None, "") else 1
+
+
 def describe(key: str, value, show: bool = False) -> str:
-    """One setting as text: the value, or only its shape for personal settings."""
+    """One setting as text: the value, or only how many entries it has for personal settings."""
     if show or key not in PERSONAL:
         return json.dumps(value, ensure_ascii=False)
-    if value in (None, [], {}, ""):
+    n = size(value)
+    if not n:
         return "not set"
-    if isinstance(value, list):
-        return f"set, {len(value)} entr{'y' if len(value) == 1 else 'ies'} (values hidden; --show prints them)"
-    if isinstance(value, dict):
-        return f"set, {len(value)} key{'s' if len(value) != 1 else ''} (values hidden; --show prints them)"
-    return "set (value hidden; --show prints it)"
+    return f"set, {n} entr{'y' if n == 1 else 'ies'} (values hidden; --show prints them)"
 
 
 def main(a) -> int:

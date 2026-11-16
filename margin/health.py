@@ -14,6 +14,7 @@ import sqlite3
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 
 from . import config, paths
 
@@ -24,6 +25,27 @@ AREAS = {"Gmail", "SMS", "Claude sorting", "Investments", "Statements", "Review"
 def python() -> str:
     """The Python the nightly job runs: the one that needs Full Disk Access for bank texts."""
     return os.path.realpath(sys.executable)
+
+
+def tilde(p) -> str:
+    """A path with the home folder as ~ (it has the Mac user's name in it)."""
+    p, home = str(p), str(Path.home())
+    return "~" + p[len(home):] if p == home or p.startswith(home + "/") else p
+
+
+def person_watching() -> bool:
+    """Is a person reading this at a terminal? Problem details (which can name statement files or holdings) are
+    printed only then; an agent or a pipe gets counts."""
+    return sys.stdout.isatty()
+
+
+def screen_line(line: str) -> str:
+    """A sync log line for the screen: the counts, and the problems only as a number unless a person is watching."""
+    head, sep, tail = line.partition(" | ")
+    if not sep or person_watching():
+        return line
+    n = len([p for p in tail.split("; ") if p.strip()])
+    return f"{head} | {n} problem{'s' if n != 1 else ''} (margin doctor in your own Terminal shows them)"
 
 
 def _loaded(label: str) -> bool:
@@ -66,8 +88,8 @@ def check_sms(settings: dict, last_sms: str | None) -> dict:
         return {"id": "sms", "ok": True, "text": "Bank SMS readable by the sync job", "state": "ok"}
     return {"id": "sms", "ok": False, "state": "no_access",
             "text": "Bank SMS: the sync job couldn't read Messages yet. Give Full Disk Access to "
-                    f"{python()} (System Settings > Privacy & Security > Full Disk Access), then run margin sync.",
-            "fix": f"the person gives Full Disk Access to {python()}, or: margin config set read_sms false"}
+                    f"{tilde(python())} (System Settings > Privacy & Security > Full Disk Access), then run margin sync.",
+            "fix": f"the person gives Full Disk Access to {tilde(python())}, or: margin config set read_sms false"}
 
 
 def last_sync() -> dict | None:
@@ -103,7 +125,7 @@ def checks() -> list[dict]:
         return c
 
     folder_ok = paths.DATA_DIR.exists() and (paths.DATA_DIR.stat().st_mode & 0o077) == 0
-    add("data_folder", folder_ok, f"Private data folder (only you can open it): {paths.DATA_DIR}",
+    add("data_folder", folder_ok, f"Private data folder (only you can open it): {tilde(paths.DATA_DIR)}",
         **({} if folder_ok else {"fix": "margin setup"}))
     connected = gmail.is_configured()
     add("gmail", connected, "Gmail connected (read-only, token in Keychain)" if connected
@@ -200,14 +222,14 @@ def report(app_path: str) -> dict:
             "exists": paths.SETTINGS_PATH.exists(),
             **{k: settings.get(k) for k in ("currency", "read_sms", "ai_sort", "ai_review", "lock_minutes",
                                             "misc_below")},
-            "personal": {k: len(settings.get(k) or []) for k in sorted(config.PERSONAL)},
+            "personal": {k: config.size(settings.get(k)) for k in sorted(config.PERSONAL)},
         },
         "secrets_saved": secrets,
         "sync": {"running": progress is not None, "progress": progress},
         "app": {"installed": os.path.exists(app_path), "page_service": _loaded(paths.WEB_LABEL)},
         "margin": {"commit": _git("rev-parse", "--short", "HEAD"), "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
-                   "folder": str(paths.PROJECT_DIR)},
-        "python_for_full_disk_access": python(),
+                   "folder": tilde(paths.PROJECT_DIR)},
+        "python_for_full_disk_access": tilde(python()),
     }
 
 
@@ -220,6 +242,12 @@ def main(json_out: bool, app_path: str) -> int:
     for c in checks():
         ok &= c["ok"]
         print(("✓ " if c["ok"] else "✗ ") + c["text"])
-        for line in c.get("lines", []):
-            print(line)
+        lines = c.get("lines", [])
+        if lines and person_watching():
+            for line in lines:
+                print(line)
+        elif lines:
+            areas = ", ".join(f"{a} {n}" for a, n in c["problem_areas"].items())
+            print(f"    · {len(lines)} problem{'s' if len(lines) != 1 else ''} ({areas}): run margin doctor in your "
+                  "own Terminal to read them")
     return 0 if ok else 1

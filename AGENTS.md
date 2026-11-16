@@ -13,11 +13,16 @@ how to adapt Margin to another bank or country, and how to work on the code with
    Learn what you need from `margin doctor --json` (checks and counts) and `margin config get` (settings;
    personal ones only as counts); change settings with `margin config set`. If the person wants you to look at
    one record to debug, they say so first, and you keep it to that record.
-   In Claude Code this is enforced: the data guard (`.claude/hooks/data_guard.py`, a PreToolUse hook in
-   `.claude/settings.json`) refuses tool calls that would read the data folder, its backups, the Messages
-   database, Margin's Keychain secrets or the real page, and Python that imports Margin's code without a
-   temporary `MARGIN_DATA`. Never disable it or work around it; if it blocks something you need, use the
-   `margin` command it names, or ask the person.
+   In Claude Code the data guard (`.claude/hooks/data_guard.py`, a PreToolUse hook in `.claude/settings.json`)
+   backs this up. It checks every tool call's input and refuses the ones that would read the data folder, its
+   backups, the Messages database, Margin's Keychain secrets or the real page, Python that loads Margin's code
+   without `MARGIN_DATA` set to another folder, and the `margin` commands that print personal things. Changes to
+   the guard or to Claude Code's settings files wait for the person's approval, and if the guard itself fails it
+   refuses. **It's an accident guard, not a sandbox:** it can't see what a program does once it runs, so the rule
+   is yours to keep, not the guard's. Never disable it or work around it; if it blocks something you need, use
+   the `margin` command it names, or ask the person.
+   Plain `margin doctor` and `margin sync` print problem details only to a person at a terminal; run by you they
+   give counts. Use `margin doctor --json`.
 2. **Secrets go into hidden prompts, never chat.** Statement passwords, PAN, PRAN and AI API keys are typed by the
    person into `margin setup-pan`, `margin setup-pran`, `margin setup-ppf` or `margin setup-ai` in their own
    Terminal (input is hidden and goes to the Keychain). Never ask them to paste one to you, and never put one on a
@@ -40,14 +45,20 @@ In Claude Code, the `margin-setup` skill (`.claude/skills/`) follows these steps
 `./margin-cli` in the repo folder until step 1 is done.
 
 `margin setup` does every step that needs no one's hands and can be run again at any time: each step checks first
-and only does what's missing. It stops at the person's steps (Gmail sign-in, bank texts, statement passwords)
-and says exactly what to do. Run by you (no terminal) it lists them and exits with status 3; in the person's own
-Terminal it waits for them, step by step.
+and only does what's missing. It changes nothing on their Mac without a yes: run by you, it only reports until
+you pass `--yes`, which you do only after the person agreed to the list of changes (`would_change`); in their own
+Terminal it shows the list and asks them. It stops at the person's steps (Gmail sign-in, bank texts, statement
+passwords) and says exactly what to do: run by you it lists them and exits with status 3; in their Terminal it
+waits for them, step by step.
 
 ```bash
-./margin-cli setup --dry-run          # what it would do; changes nothing
-./margin-cli setup --json --no-sync   # do it; statuses only: steps, waiting_on_you, failed
+./margin-cli setup --json --no-sync         # changes nothing: would_change, waiting_on_you, failed, steps
+./margin-cli setup --yes --json --no-sync   # after the person said yes to would_change
 ```
+
+What it changes, at most: a link `~/.local/bin/margin`, a line in `~/.zshrc`, the private data folder (default
+settings and two helper programs), two LaunchAgents (the nightly sync and the page service) and the Margin app in
+`~/Applications`.
 
 Try the demo first so they see what they're setting up: `./margin-cli demo` (US person, dollars) or
 `./margin-cli demo --india` (Indian person, rupees). Stop it with Ctrl-C.
@@ -74,8 +85,9 @@ margin config set self_names '["KAVYA MENON", "MENON KAVYA"]'
 margin config get                    # what's set; personal values show only as counts
 ```
 
-`config set` checks the type and refuses secrets (it names the hidden-prompt command instead). Nobody needs to
-open the file.
+`config set` checks the type and refuses secrets (it names the hidden-prompt command instead). It also refuses
+settings that name a program (`claude_path` and the like): the nightly sync would run it with prompts built from
+their money data, so only the person sets those, by hand. Nobody else needs to open the file.
 
 | Key | Ask them | Example |
 |---|---|---|
@@ -131,11 +143,12 @@ Walk them through it; they must be signed in to Google Cloud with **their person
    link; add its domain under Authorised domains → **Save**. (Needed before Publish; nobody else sees it.)
 5. **Audience** → **Publish app** → Confirm. (Left in "Testing", Google expires access every 7 days.)
 6. **Clients** → **Create client** → **Desktop app**, name `margin-mac` → **Download JSON**.
-7. You run: `margin setup-gmail ~/Downloads/client_secret_*.json`. Their browser opens; they pick their Gmail,
-   click **Advanced → Go to margin (unsafe)** (it's their own app), allow read-only access.
-   Check: Terminal says `Connected read-only to …`; `margin doctor --json` has `gmail` and `gmail_token` ok.
-   (Or they run `margin setup` in their own Terminal: it asks for the file and does the same.)
-8. You run: `rm ~/Downloads/client_secret_*.json` (its contents are now in the Keychain).
+7. Ask for the downloaded file's exact name, then you run: `margin setup-gmail "<that exact path>"`. Their
+   browser opens; they pick their Gmail, click **Advanced → Go to margin (unsafe)** (it's their own app), allow
+   read-only access. Check: `Connected read-only to your Gmail`; `margin doctor --json` has `gmail` and
+   `gmail_token` ok. (Or they run `margin setup` in their own Terminal: it asks for the file and does the same.)
+8. Ask, then delete **that exact file** (its contents are now in the Keychain). Never a wildcard like
+   `client_secret_*.json`: other apps' client secrets can sit in the same folder.
 
 Problems: Publish greyed out → step 4 incomplete. "Access blocked" → step 5 skipped. "No long-lived token" → they
 remove margin at <https://myaccount.google.com/permissions>, then redo step 7.
@@ -195,11 +208,11 @@ that couldn't be read show in the sync's problems ("Statements: ...").
 
 ### 6. Schedule, app, first sync (`margin setup` does it)
 
-`margin setup` builds the Swift helpers (the PDF reader and the Touch ID prompt, into the data folder's `bin/`),
-schedules the nightly 00:00 sync (`margin schedule install`), installs the Margin app and the always-on page at
-<http://margin.localhost/> (`margin app install`), and once Gmail is connected starts the first sync in the
-background (it reads 12 months of mail; up to an hour). `margin sync` shows its progress; so does `sync` in
-`margin doctor --json`.
+`margin setup --yes` builds the Swift helpers (the PDF reader and the Touch ID prompt, into the data folder's
+`bin/`), schedules the nightly 00:00 sync (`margin schedule install`), installs the Margin app and the always-on
+page at <http://margin.localhost/> (`margin app install`), and once Gmail is connected starts the first sync in
+the background (it reads 12 months of mail; up to an hour; it's listed in `would_change` first, so ask).
+`margin sync` shows its progress; so does `sync` in `margin doctor --json`.
 
 They open **Margin** from Spotlight (or drag it to the Dock): the page in a window of its own, built on their Mac
 with swiftc. Touch ID asks on first open. It's the private way to use Margin: browser extensions that can read all
@@ -220,7 +233,7 @@ In the page's **Sort out**: pick categories for the biggest payees (each becomes
 
 ### Verify
 
-`margin setup --json`: `waiting_on_you` and `failed` empty. `margin doctor --json` after the first sync: every
+`margin setup --json`: `would_change`, `waiting_on_you` and `failed` empty. `margin doctor --json` after the first sync: every
 check ok, `counts.transactions` above 0. The person checks the page: it opens, locks after two minutes away, and
 the next morning says "Updated … 12:0x am" at the top.
 
@@ -228,11 +241,17 @@ The Margin app opens the page in its own window and locks at once when it's hidd
 
 ## Updating
 
-`margin update` (the `margin-update` skill): `git pull --ff-only` (never a merge), the tests on a temporary data
-folder, then it rebuilds the Swift helpers and the app and reloads the launchd agents. If the tests fail it goes
-back to the previous version by itself. It waits while a sync runs and never reads or changes their data.
-`margin update --check` only says whether there's something new. Afterwards: `margin doctor --json` and
-`margin setup --json` (a new version can bring a new step).
+The `margin-update` skill follows this.
+
+1. `margin update --check` fetches and lists the incoming commits (how many, and their subjects). It changes
+   nothing.
+2. Show the person the list and ask. No new code runs before they've seen it and said yes.
+3. `margin update --to <commit>` (the commit `--check` printed): fast-forwards to exactly that commit (never a
+   merge; later arrivals aren't included), then, running the new code, the tests on a temporary data folder,
+   going back to the previous version by itself if they fail; then it rebuilds the Swift helpers and the app and
+   reloads the launchd agents. It refuses while a sync runs and never reads or changes their data. In the
+   person's own Terminal, plain `margin update` shows the list and asks them.
+4. Afterwards: `margin doctor --json` and `margin setup --json` (a new version can bring a new step).
 
 ## Adding a bank or a country
 
@@ -278,8 +297,9 @@ answer against the job's schema. Test AI changes with the fake providers in `tes
 person's data to an AI while working on the code; try a real CLI only with a made-up payload, and only after they
 agree (it uses their account).
 
-To try Margin's code by hand, give it a temporary folder: `MARGIN_DATA="$(mktemp -d)" python3 -c '…'` (the data
-guard refuses Python that imports `margin` without one). Commands that change launchd, the app or the Keychain
+To try Margin's code by hand, give it a temporary folder: `MARGIN_DATA="$(mktemp -d)" python3 -c '…'`, or the
+demo's (the data guard refuses Python that loads `margin` unless `MARGIN_DATA` itself is set, in the command, to
+a folder other than theirs). Commands that change launchd, the app or the Keychain
 (`setup`, `update`, `schedule`, `app`) act on the person's real install: don't run them while developing without
 their yes; the tests replace them with stand-ins.
 
