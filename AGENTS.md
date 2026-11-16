@@ -23,7 +23,8 @@ how to adapt Margin to another bank or country, and how to work on the code with
    [Made-up data](#made-up-data)). Never copy a real message, statement or amount into the repo.
 6. **The leak guard is not optional.** Run `./margin-cli privacy-check` before every commit; never use
    `git commit --no-verify` or `git push --no-verify`. If it reports something, replace it with made-up data.
-7. **Show Margin in public only as the demo** (`margin demo`): screenshots, screen recordings, bug reports.
+7. **Show Margin in public only as the demo** (`margin demo`, or `margin demo --app` in the app's window):
+   screenshots, screen recordings, bug reports.
 
 ## Setup
 
@@ -35,7 +36,7 @@ Run these in order. `margin` below means `~/projects/margin/margin-cli` (or wher
 sw_vers -productVersion                 # macOS
 xcode-select -p                         # command line tools; if missing, the person runs: xcode-select --install
 /usr/bin/python3 --version              # 3.9 or newer (comes with the command line tools)
-/usr/bin/swiftc --version               # for the PDF reader and the Touch ID prompt
+/usr/bin/swiftc --version               # for the Margin app, the PDF reader and the Touch ID prompt
 command -v claude                       # optional: Claude Code, for sorting and reviews
 ```
 
@@ -120,13 +121,17 @@ Each `setup-*` asks in a hidden prompt, saves to the Keychain and checks it open
 
 ```bash
 margin schedule install     # the nightly 00:00 sync (launchd)
-margin app install          # the Margin app (Spotlight) and the always-on page at http://margin.localhost/
+margin app install          # the Margin app (its own window) and the always-on page at http://margin.localhost/
 margin sync                 # first run reads 12 months of mail; can take an hour; safe to close Terminal
 margin doctor               # every line should be ✓
 ```
 
-They open **Margin** from Spotlight once in each browser they use (that hands the browser its key), then bookmark
-<http://margin.localhost/>. Touch ID asks on first open.
+They open **Margin** from Spotlight (or drag it to the Dock): the page in a window of its own, built on their Mac
+with swiftc. Touch ID asks on first open. It's the private way to use Margin: browser extensions that can read all
+sites can read the page in a tab, and a tab leaves it in the browser's history and cache. To use a browser as well,
+`margin open` once in that browser hands it the key; then they bookmark <http://margin.localhost/>. Without the
+command line tools, `margin app install` makes a small app that opens the browser instead; run it again once
+they're installed. `margin app remove` removes the app and the page service.
 
 ### 7. Sort out (they decide; 15 minutes)
 
@@ -135,7 +140,8 @@ In the page's **Sort out**: pick categories for the biggest payees (each becomes
 
 ### Verify
 
-`margin doctor` all ✓; the page opens and locks after two minutes away; `margin schedule status` installed; the
+`margin doctor` all ✓; the Margin app opens the page in its own window and locks after two minutes away (and at
+once when hidden); `margin schedule status` installed; the
 next morning, "Updated … 12:0x am" at the top of the page.
 
 ## Adding a bank or a country
@@ -160,7 +166,9 @@ python3 -m unittest discover -s tests -t .     # all tests; they use a temporary
 ```
 
 The page is `margin/dashboard.py` (one HTML template, built on request); after changing it, restart the page
-service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the demo.
+service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the demo. After changing
+`margin/macapp.swift`, `margin app install` builds the app again (the demo's own copy rebuilds itself), and
+`./margin-cli demo --app` shows it on made-up data.
 
 | File | What it does |
 |---|---|
@@ -172,6 +180,7 @@ service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the 
 | `invest.py`, `cas.py`, `nps.py`, `usstocks.py`, `epf.py`, `fd.py`, `ppf.py`, `prices.py` | Investments |
 | `networth.py`, `tidy.py` | Net worth; Sort out logic |
 | `server.py`, `dashboard.py`, `icon.py`, `lock.py`, `touchid.swift` | The local page, its server and the Touch ID lock |
+| `macapp.py`, `macapp.swift` | The Margin app: the page in its own window (AppKit + WebKit), built with swiftc |
 | `pdf.py`, `pdftext.swift`, `keychain.py` | Locked PDFs via PDFKit; Keychain secrets |
 | `demo.py` | The made-up demo people and the stand-ins for Claude, sync and Touch ID |
 | `privacy.py`, `.githooks/` | The leak guard |

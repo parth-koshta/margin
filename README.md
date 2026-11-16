@@ -3,7 +3,8 @@
 **Your money, on your Mac.** Margin shows where your money comes from and where it goes, what your investments are
 doing, and your net worth. It reads your bank and card alerts (Gmail and the text messages your iPhone forwards to
 your Mac), your investment statements, and anything you add by hand, then syncs every night at 00:00 by itself.
-Everything is stored and shown on your Mac only, at <http://margin.localhost/>, behind Touch ID.
+Everything is stored and shown on your Mac only, in the Margin app's own window (or at <http://margin.localhost/>
+in a browser), behind Touch ID.
 
 - **Spending**: money in and out by month or pay cycle, by category and payee, with rules you set once.
 - **Investments**: stocks, funds, retirement accounts, deposits and more, valued daily, with stop-loss alerts
@@ -31,7 +32,8 @@ This opens <http://demo.margin.localhost:8765/> on a made-up person's money: Jor
 plays a pretend sync, “Ask Claude to sort now” and the reviews are answered by a stand-in, and `--lock` starts
 at the lock screen with a simulated Touch ID. The demo lives in `~/Library/Caches/Margin Demo/`, rebuilds
 itself each day so it always ends today, and whenever Margin's code changes (`--fresh` rebuilds now). It never
-touches real data or the internet.
+touches real data or the internet. `--app` opens it in the Margin app's own window instead of the browser
+(closing the window stops the demo).
 Use it for screenshots and videos: it's the only Margin that should ever be on screen in public.
 
 ## Set it up
@@ -51,13 +53,19 @@ command line tools (`xcode-select --install`, which also provides Python 3.9+ an
   that way.
 - **Gmail is read-only**, through your own Google sign-in. The token is in your macOS Keychain (service
   `margin`). Margin can't send, delete or change mail.
+- **The Margin app** shows the page in a window of its own: a small program built on your Mac from
+  `margin/macapp.swift` (AppKit and WebKit, no Xcode project, no code from anyone else). Nothing from the page is
+  kept on disk (no history, cache, cookies or autofill), browser extensions can't see it, and links to other sites
+  open in your browser. It reads the page's key from your data folder and hands it over in a private cookie, never
+  in an address. Without the Xcode command line tools, the Margin app opens the page in your browser instead.
 - **The page** at <http://margin.localhost/> is served by a tiny server on your Mac only (127.0.0.1 and ::1, not
   reachable from other machines). `*.localhost` always means your own Mac, so nothing on a shared Wi-Fi can
   pretend to be it, and Chrome treats it as secure. A secret key is handed to your browser once and kept in a
   private cookie, so other websites can't read Margin. The page loads nothing from the internet.
 - **Touch ID lock**: two minutes after you leave the page (another tab, another app, or sleep), Margin locks and
   asks for Touch ID (or your Mac password). While locked the server sends no data at all. The **Lock** button
-  locks at once; `"lock_minutes"` in `settings.json` changes the time (0 turns it off).
+  locks at once, and so does hiding or quitting the Margin app, or your Mac locking or sleeping.
+  `"lock_minutes"` in `settings.json` changes the time (0 turns it off).
 - **Statement passwords** (PAN, PRAN, PPF statement password) are typed into hidden Terminal prompts and kept
   in the Keychain. PDFs are opened by macOS's own PDF reader and never saved unlocked.
 - **Prices**: Indian stocks and funds come from whole-market files (NSE/BSE closes, AMFI NAVs), so nothing
@@ -73,13 +81,13 @@ command line tools (`xcode-select --install`, which also provides Python 3.9+ an
 
 | Command | What it does |
 |---|---|
-| <http://margin.localhost/>, the Margin app, `margin open` | Home, Spending, Investments, Sort out, Reviews, Sync now |
+| The Margin app (Spotlight); in a browser `margin open`, then <http://margin.localhost/> | Home, Spending, Investments, Sort out, Reviews, Sync now |
 | `margin sync` | Sync now instead of waiting for midnight (or watch a running sync) |
 | `margin doctor` | Check that everything works |
 | `margin rule "swiggy" "Food & dining"` | Put matching payees in a category (past and future) |
 | `margin trust "mybank.in"` | Count alerts from a sender Margin didn't know was a bank |
 | `margin tidy` | Sort out in Terminal instead of the page |
-| `margin demo [--india] [--lock] [--fresh]` | The made-up demo |
+| `margin demo [--india] [--lock] [--fresh] [--app]` | The made-up demo (`--app`: in the Margin app's window) |
 | `margin privacy-check` | Look for your personal details in the code (see [Leak guard](#leak-guard)) |
 | `margin schedule status` | Is the nightly sync installed? |
 
