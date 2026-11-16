@@ -184,6 +184,39 @@ class Files(unittest.TestCase):
         self.assertEqual([(x["ticker"], x["shares"], x["value"]) for x in a["positions"]],
                          [("VOO", 10.0, 5000.0), (None, 1, 100.0)])
 
+    def test_names_are_whole_words(self):
+        self.assertIsNone(imports._bank_from("mf purchase history"))           # not "chase"
+        self.assertIsNone(imports._bank_from("discovery fund units"))          # not "discover"
+        self.assertEqual(imports._bank_from("Chase1234_Activity_20261114"), "Chase")
+        self.assertEqual(imports._bank_from("discover-card-1234"), "Discover")
+
+    def test_rupees_at_home_needs_a_us_name_in_the_file_name(self):
+        # Made-up Indian files that say "Purchase" inside: they stay with networth.import_holdings.
+        p = self.file("demo-holdings.csv", "Symbol,Quantity,Avg Purchase Price,Current Value\nDEMOIND,10,700,7426\n")
+        self.assertIsNone(imports.classify(p, "INR"))
+        q = self.file("sip-history.csv", "Date,Scheme,Transaction Type,Amount\n"
+                                         "05/11/2026,DEMO FLEXI CAP FUND,SIP Purchase,5000\n")
+        self.assertIsNone(imports.classify(q, "INR"))
+        r = self.file("statement.csv", "Note: exported from Chase\nDetails,Posting Date,Description,Amount,Type,Balance\n"
+                                       "DEBIT,11/14/2026,DEMO SHOP,-45.00,DEBIT_CARD,955.00\n")
+        self.assertIsNone(imports.classify(r, "INR"))                         # the name must say it
+        self.assertEqual(imports.classify(r, "USD"), "bank")
+
+    def test_name_fields_never_stored(self):
+        c = mem()
+        a = imports.Activity("Bank of America", "account", "5555", "USD")
+        a.txns = [{"date": "2026-11-03", "amount": 1500.0, "fitid": None,
+                   "desc": "ACME CORP DES:PAYROLL ID:XXXXX INDN:JORDAN LEE CO ID:XXXXX PPD"},
+                  {"date": "2026-11-04", "amount": 900.0, "fitid": None,
+                   "desc": "ORIG CO NAME:ACME CORP ORIG ID:1234567890 DESC DATE:261104 CO ENTRY DESCR:PAYROLL "
+                           "SEC:PPD TRACE#:000000000000001 EED:261104 IND ID:0000 IND NAME:JORDAN LEE TRN: 0000TC"}]
+        imports.store_activity(c, a, "bofa-checking-5555.csv", US)
+        for r in c.execute("SELECT raw, counterparty, category FROM transactions"):
+            self.assertNotIn("JORDAN", r["raw"])
+            self.assertNotIn("XXXXX", r["raw"])
+            self.assertNotIn("1234567890", r["raw"])
+            self.assertEqual((r["counterparty"], r["category"]), ("ACME CORP", "Salary"))
+
     def test_rupees_at_home_leaves_indian_csvs_alone(self):
         # A holdings export from an Indian app (made-up) stays with networth.import_holdings, read as before.
         p = self.file("groww-stocks.csv", "Stock Name,Symbol,Quantity,Average buy price,Current Value\n"

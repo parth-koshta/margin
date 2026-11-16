@@ -56,19 +56,32 @@ def available() -> tuple[bool, str]:
 SHORT_CODE = re.compile(r"\d{5,6}")
 
 
-def is_service_sender(sender: str) -> bool:
+def is_service_sender(sender: str, short_codes: bool | set = True) -> bool:
     """Banks text from alphanumeric sender IDs (India: JD-HDFCBK-S) or 5-6 digit short codes (US: 24273).
-    Never a person: phone numbers (7+ digits, +1...) and email addresses are not read at all."""
+    Never a person: phone numbers (7+ digits, +1...) and email addresses are not read at all. short_codes: True
+    reads every short code (outside India), a set only those codes (the ones you trusted), False none."""
     s = (sender or "").strip()
     if not s or "@" in s:
         return False
     if any(c.isalpha() for c in s):
         return True
-    return bool(SHORT_CODE.fullmatch(s))
+    if not SHORT_CODE.fullmatch(s):
+        return False
+    return short_codes is True or (isinstance(short_codes, (set, frozenset)) and s in short_codes)
 
 
-def fetch_since(after_rowid: int):
-    """Yield dicts {id, rowid, sender, ts_epoch, text} for incoming texts from service senders (never people)."""
+def short_codes_for(settings: dict) -> bool | set:
+    """Which short codes to read: all of them outside India; with rupees at home only the ones you trusted
+    (Indian banks text from sender IDs, so a short code there is rarely a bank)."""
+    from . import money   # noqa: PLC0415
+    if money.home(settings) != "INR":
+        return True
+    return {t.strip() for t in settings.get("trusted_senders") or [] if SHORT_CODE.fullmatch(t.strip())}
+
+
+def fetch_since(after_rowid: int, short_codes: bool | set = False):
+    """Yield dicts {id, rowid, sender, ts_epoch, text} for incoming texts from service senders (never people);
+    short codes as is_service_sender says (none unless asked)."""
     ok, why = available()
     if not ok:
         raise NoAccess(why)
@@ -89,7 +102,7 @@ def fetch_since(after_rowid: int):
         shutil.rmtree(tmp, ignore_errors=True)
     for rowid, guid, date, text, body, sender in rows:
         sender = sender or ""
-        if not is_service_sender(sender):
+        if not is_service_sender(sender, short_codes):
             continue
         text = text or _decode_attributed(body)
         if not text:

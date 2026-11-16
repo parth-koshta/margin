@@ -5,7 +5,7 @@ import tests  # noqa: F401  (first: points margin at a temporary data folder, se
 
 import sqlite3
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from margin import ai, categorize, db, gmail, parse, sms, sync
 
@@ -41,15 +41,23 @@ class Texts(unittest.TestCase):
             self.assertFalse(sms.is_service_sender(s), s)
 
     def test_short_code_banks(self):
-        self.assertEqual(parse.bank_for_sender("24273"), "Chase")
-        self.assertEqual(parse.bank_for_sender("93557"), "Wells Fargo")
-        self.assertEqual(parse.bank_for_sender("555123", text="Capital One: A purchase of $45.00 was made"),
-                         "Capital One")
-        self.assertEqual(parse.bank_for_sender("555123", text="BofA: Your available balance is $1,000.00"),
-                         "Bank of America")
-        self.assertIsNone(parse.bank_for_sender("555123", text="Your DEMO PIZZA order of $24.00 is on its way"))
-        self.assertIsNone(parse.bank_for_sender("2065550100", text="Chase: A $45.00 transaction"))   # a person
-        self.assertEqual(parse.bank_for_sender("555123", ["555123"]), "555123")                  # trusted by you
+        b = lambda s, text="", trusted=None, home="USD": parse.bank_for_sender(s, trusted, text, home)  # noqa: E731
+        self.assertEqual(b("24273"), "Chase")
+        self.assertEqual(b("93557"), "Wells Fargo")
+        self.assertEqual(b("555123", "Capital One: A purchase of $45.00 was made"), "Capital One")
+        self.assertEqual(b("555123", "BofA: Your available balance is $1,000.00"), "Bank of America")
+        self.assertIsNone(b("555123", "Your DEMO PIZZA order of $24.00 is on its way"))
+        self.assertIsNone(b("2065550100", "Chase: A $45.00 transaction"))       # a person
+        self.assertEqual(b("555123", trusted=["555123"]), "555123")             # trusted by you
+
+    def test_rupees_at_home_short_codes_only_once_trusted(self):
+        self.assertIsNone(parse.bank_for_sender("24273", None, "Chase: A $45.00 transaction", "INR"))
+        self.assertEqual(parse.bank_for_sender("24273", ["24273"], "", "INR"), "24273")
+        self.assertIs(sms.short_codes_for(US), True)
+        self.assertEqual(sms.short_codes_for(dict(IN, trusted_senders=["55512", "VM-MYBANK", "demo.in"])), {"55512"})
+        self.assertFalse(sms.is_service_sender("24273", set()))
+        self.assertTrue(sms.is_service_sender("55512", {"55512"}))
+        self.assertTrue(sms.is_service_sender("JD-HDFCBK-S", set()))            # sender IDs always
 
 
 class Senders(unittest.TestCase):
@@ -65,11 +73,19 @@ class Senders(unittest.TestCase):
                              ("alerts@synchrony.com", "Synchrony"), ("alerts@schwab.com", "Schwab"),
                              ("alerts@fidelity.com", "Fidelity"),
                              ("American Express <AmericanExpress@welcome.americanexpress.com>", "Amex")]:
-            self.assertEqual(parse.bank_for_sender(sender), bank, sender)
+            self.assertEqual(parse.bank_for_sender(sender, home="USD"), bank, sender)
+
+    def test_brokers_are_banks_only_outside_india(self):
+        # An Indian RSU / ESPP holder's broker mail ("shares deposited", "proceeds credited") isn't their bank.
+        for sender in ("alerts@schwab.com", "Fidelity <alerts@fidelity.com>"):
+            self.assertIsNone(parse.bank_for_sender(sender), sender)
+            self.assertIsNone(parse.bank_for_sender(sender, home="INR"), sender)
+            self.assertIsNotNone(parse.bank_for_sender(sender, home="USD"), sender)
+        self.assertEqual(parse.bank_for_sender("no.reply.alerts@chase.com", home="INR"), "Chase")
 
     def test_not_inside_other_names(self):
-        self.assertIsNone(parse.bank_for_sender("deals@monkey.com"))          # not KeyBank's key.com
-        self.assertIsNone(parse.bank_for_sender("orders@purchase.example"))   # "chase" inside a word
+        self.assertIsNone(parse.bank_for_sender("deals@monkey.com", home="USD"))          # not KeyBank's key.com
+        self.assertIsNone(parse.bank_for_sender("orders@purchase.example", home="USD"))   # "chase" inside a word
 
     def test_indian_senders_unchanged(self):
         self.assertEqual(parse.bank_for_sender("HDFC Bank InstaAlerts <alerts@hdfcbank.net>"), "HDFC")
@@ -191,9 +207,49 @@ class Ingest(unittest.TestCase):
 
     def test_short_code_text(self):
         c = mem()
-        kind = sync.ingest(c, self.msg("Chase: A $8.50 debit card transaction to DEMO CAFE on 11/14/2026 exceeded "
-                                       "your $0.00 set alert.", "24273"), "sms", US)
-        self.assertEqual(kind, "txn")
+        text = "Chase: A $8.50 debit card transaction to DEMO CAFE on 11/14/2026 exceeded your $0.00 set alert."
+        self.assertEqual(sync.ingest(c, self.msg(text, "24273"), "sms", US), "txn")
+
+    def test_rupees_at_home_broker_mail_is_not_income(self):
+        c = mem()
+        kind = sync.ingest(c, self.msg("Your RSU shares were deposited and $1,000.00 credited to your account ending "
+                                       "in 1234.", "alerts@schwab.com"), "email", IN)
+        self.assertNotEqual(kind, "txn")
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM transactions").fetchone()[0], 0)
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM balances").fetchone()[0], 0)
+
+    def test_one_payment_from_three_sources(self):
+        # The same spend by email, by text and in a downloaded statement counts once, in any order.
+        from margin import imports
+        email = "Chase: You made a $45.00 transaction with DEMO SHOP on card ending in 9876."
+        text = "Chase: A $45.00 debit card transaction to DEMO SHOP on card ending in 9876."
+        file = imports.Activity("Chase", "card", "9876", "USD")
+        file.txns = [{"date": "2026-11-14", "amount": -45.0, "desc": "DEMO SHOP", "fitid": "F1"}]
+        when = datetime(2026, 11, 13, 19, 5)
+        orders = [("email", "sms", "file"), ("file", "email", "sms"), ("sms", "file", "email"), ("email", "file", "sms")]
+        for order in orders:
+            c = mem()
+            for i, src in enumerate(order):
+                if src == "file":
+                    imports.store_activity(c, file, "chase-9876.csv", US)
+                else:
+                    sync.ingest(c, {"id": f"x{i}", "sender": "24273" if src == "sms" else "no.reply.alerts@chase.com",
+                                    "subject": "", "ts_epoch": (when + timedelta(minutes=i)).timestamp(),
+                                    "text": text if src == "sms" else email}, src, US)
+            n = c.execute("SELECT COUNT(*), COUNT(duplicate_of) FROM transactions").fetchone()
+            self.assertEqual((n[0], n[0] - n[1]), (3, 1), order)
+            roots = c.execute("SELECT COUNT(DISTINCT duplicate_of) FROM transactions WHERE duplicate_of IS NOT NULL")
+            self.assertEqual(roots.fetchone()[0], 1, order)                   # one kept row, two copies of it
+
+    def test_without_files_one_copy_per_kept_payment(self):
+        # Rupee alerts, email and text only: unchanged, a kept payment takes one copy.
+        c = mem()
+        msgs = [("sms", "JD-HDFCBK-S"), ("email", "alerts@hdfcbank.net"), ("sms", "JD-HDFCBK-S")]
+        for i, (src, sender) in enumerate(msgs):
+            sync.ingest(c, {"id": f"r{i}", "sender": sender, "subject": "", "ts_epoch": datetime(
+                2026, 11, 13, 9, i).timestamp(), "text": "Rs.450.00 debited from a/c **1234 to VPA demo@ybl DEMO"},
+                src, IN)
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM transactions WHERE duplicate_of IS NULL").fetchone()[0], 2)
 
     def test_us_bank_with_rupees_at_home(self):
         c = mem()
@@ -258,36 +314,74 @@ class Brands(unittest.TestCase):
 
 
 class ClaudeBalances(unittest.TestCase):
-    def test_balance_and_card_due_recorded_and_undone(self):
-        c = mem()
-        c.execute("INSERT INTO review VALUES (?,?,?,?,?,?)",
-                  ("email:b1", "email", "alerts@demo-cu.example", "2026-11-14T08:00:00", "no debit/credit wording",
-                   "Demo CU: Checking ••2222 end-of-day funds $1,500.00"))
-        c.execute("INSERT INTO review VALUES (?,?,?,?,?,?)",
-                  ("email:b2", "email", "alerts@demo-cu.example", "2026-11-14T08:00:00", "no debit/credit wording",
-                   "Demo CU Visa ••4321: you owe $300.00, pay by Dec 5"))
-        answers = [{"id": "0", "verdict": "balance", "amount": 1500, "currency": "USD", "last4": "2222",
-                    "card": False, "reason": "end-of-day balance"},
-                   {"id": "1", "verdict": "balance", "amount": 300, "currency": "USD", "last4": "4321",
-                    "card": True, "due_date": "2026-12-05", "reason": "card balance owed"}]
-        settings = dict(US, trusted_senders=["demo-cu.example"])
+    def run_job(self, c, answers, settings):
         real = ai._ask
-        ai._ask = lambda payload, system, schema, s: (answers, "")
+        seen = {}
+
+        def fake(payload, system, schema, s):
+            seen["system"], seen["schema"] = system, schema
+            return answers, ""
+        ai._ask = fake
         try:
-            applied, _ = ai.job_unread(c, settings)
+            return ai.job_unread(c, settings)[0], seen
         finally:
             ai._ask = real
+
+    def review(self, c, *snippets):
+        for i, t in enumerate(snippets):
+            c.execute("INSERT INTO review VALUES (?,?,?,?,?,?)", (f"email:b{i}", "email", "alerts@demo-cu.example",
+                                                                 "2026-11-14T08:00:00", "no debit/credit wording", t))
+
+    def test_balance_and_card_due_recorded_and_undone(self):
+        c = mem()
+        self.review(c, "Demo CU: Checking ••2222 end-of-day funds $1,500.00",
+                    "Demo CU Visa ••4321: you owe $300.00, pay by Dec 5")
+        answers = [{"id": "0", "verdict": "balance", "amount": 1500, "currency": "USD", "last4": "2222",
+                    "account_type": "checking", "card": False, "reason": "end-of-day balance"},
+                   {"id": "1", "verdict": "balance", "amount": 300, "currency": "USD", "last4": "4321",
+                    "account_type": "credit_card", "card": True, "due_date": "2026-12-05", "reason": "card balance"}]
+        settings = dict(US, trusted_senders=["demo-cu.example"])
+        applied, seen = self.run_job(c, answers, settings)
         self.assertEqual(applied, 2)
+        self.assertIs(seen["system"], ai.UNREAD_SYSTEM)
         self.assertEqual(tuple(c.execute("SELECT account, balance FROM balances").fetchone()),
                          ("demo-cu.example a/c ••2222", 1500.0))
         self.assertEqual(tuple(c.execute("SELECT account, total_due, due_date FROM card_dues").fetchone()),
                          ("demo-cu.example card ••4321", 300.0, "2026-12-05"))
         self.assertEqual(c.execute("SELECT COUNT(*) FROM review").fetchone()[0], 0)
-        d = c.execute("SELECT id FROM ai_decisions WHERE key='email:b1'").fetchone()[0]
+        d = c.execute("SELECT id FROM ai_decisions WHERE key='email:b0'").fetchone()[0]
         ai.undo(c, settings, d)
         self.assertEqual(c.execute("SELECT COUNT(*) FROM balances").fetchone()[0], 0)
         self.assertEqual(c.execute("SELECT COUNT(*) FROM review").fetchone()[0], 1)
 
+    def test_loans_and_outstanding_amounts_are_never_assets(self):
+        c = mem()
+        self.review(c, "Demo CU: your auto loan ••5555 outstanding balance is $12,000.00",
+                    "Demo CU: account ••2222 outstanding balance $800.00",
+                    "Demo CU: account ••3333 balance $50.00")
+        answers = [{"id": "0", "verdict": "balance", "amount": 12000, "currency": "USD", "last4": "5555",
+                    "account_type": "loan", "card": False, "reason": "loan balance"},
+                   {"id": "1", "verdict": "balance", "amount": 800, "currency": "USD", "last4": "2222",
+                    "account_type": "checking", "card": False, "reason": "outstanding balance"},
+                   {"id": "2", "verdict": "balance", "amount": 50, "currency": "USD", "last4": "3333",
+                    "account_type": "other", "card": False, "reason": "a balance"}]
+        applied, _ = self.run_job(c, answers, dict(US, trusted_senders=["demo-cu.example"]))
+        self.assertEqual(applied, 0)
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM balances").fetchone()[0], 0)
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM card_dues").fetchone()[0], 0)
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM review").fetchone()[0], 3)        # left to the person
+
+    def test_rupees_at_home_reader_unchanged(self):
+        c = mem()
+        self.review(c, "Demo Bank: A/c XX2222 balance Rs 1,500.00")
+        answers = [{"id": "0", "verdict": "balance", "amount": 1500, "currency": "INR", "last4": "2222",
+                    "account_type": "savings", "card": False, "reason": "balance"}]
+        applied, seen = self.run_job(c, answers, dict(IN, trusted_senders=["demo-cu.example"]))
+        self.assertIs(seen["system"], ai.UNREAD_SYSTEM_INR)
+        self.assertIs(seen["schema"], ai.UNREAD_SCHEMA_INR)
+        self.assertNotIn("balance", ai.UNREAD_SCHEMA_INR["properties"]["decisions"]["items"]["properties"]
+                         ["verdict"]["enum"])
+        self.assertEqual((applied, c.execute("SELECT COUNT(*) FROM balances").fetchone()[0]), (0, 0))
 
 if __name__ == "__main__":
     unittest.main()

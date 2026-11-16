@@ -112,15 +112,17 @@ def _rows(path: Path) -> list[list[str]]:
 
 
 # --- which bank or broker, which account -----------------------------------------------------------------------
-FILE_BANKS = [
-    (r"chase", "Chase"), (r"bank ?of ?america|bofa|\bboa\b", "Bank of America"), (r"wells ?fargo|\bwf\b", "Wells Fargo"),
-    (r"capital ?one|\b360\b", "Capital One"), (r"discover", "Discover"), (r"\bciti", "Citi"),
-    (r"amex|american ?express", "Amex"), (r"u\.?s\.? ?bank", "U.S. Bank"), (r"\bpnc\b", "PNC"), (r"\bally\b", "Ally"),
-    (r"schwab", "Schwab"), (r"fidelity", "Fidelity"), (r"\bsofi\b", "SoFi"), (r"synchrony", "Synchrony"),
-    (r"navy ?federal", "Navy Federal"), (r"\busaa\b", "USAA"), (r"barclay", "Barclays US"), (r"\btd ?bank\b", "TD Bank"),
+# Bank and broker names in a file's name (or contents), as whole words: "chase" isn't in "purchase", nor
+# "discover" in "Discovery". Digits may touch a name (Chase1234_Activity.csv).
+FILE_BANKS = [(re.compile(rf"(?<![a-z])(?:{rx})(?![a-z])"), name) for rx, name in [
+    (r"chase", "Chase"), (r"bank ?of ?america|bofa|boa", "Bank of America"), (r"wells ?fargo|wf", "Wells Fargo"),
+    (r"capital ?one", "Capital One"), (r"discover", "Discover"), (r"citi(?:bank)?", "Citi"),
+    (r"amex|american ?express", "Amex"), (r"u\.?s\.? ?bank", "U.S. Bank"), (r"pnc", "PNC"), (r"ally", "Ally"),
+    (r"schwab", "Schwab"), (r"fidelity", "Fidelity"), (r"sofi", "SoFi"), (r"synchrony", "Synchrony"),
+    (r"navy ?federal", "Navy Federal"), (r"usaa", "USAA"), (r"barclays?", "Barclays US"), (r"td ?bank", "TD Bank"),
     (r"apple ?card", "Apple Card"), (r"vanguard", "Vanguard"), (r"robinhood", "Robinhood"),
-    (r"e\*? ?trade", "E*TRADE"), (r"merrill", "Merrill"), (r"marcus", "Marcus"), (r"\bchime\b", "Chime"),
-]
+    (r"e ?\*? ?trade", "E*TRADE"), (r"merrill", "Merrill"), (r"marcus", "Marcus"), (r"chime", "Chime"),
+]]
 CARD_WORDS = re.compile(r"card|credit|visa|master ?card|amex|american ?express|discover|sapphire|freedom|venture|"
                         r"quicksilver|savor|double ?cash|custom ?cash|apple", re.I)
 RETIRE_RE = re.compile(r"\b(?:ira|roth|401\s*\(?\s*k\s*\)?|403\s*\(?\s*b\s*\)?|457\s*\(?\s*b?\s*\)?|sep|simple|tsp|"
@@ -130,11 +132,10 @@ RETIRE_RE = re.compile(r"\b(?:ira|roth|401\s*\(?\s*k\s*\)?|403\s*\(?\s*b\s*\)?|4
 def _bank_from(text: str) -> str | None:
     t = (text or "").lower().replace("_", " ").replace("-", " ")
     for rx, name in FILE_BANKS:
-        if re.search(rx, t):
+        if rx.search(t):
             return name
-    compact = re.sub(r"[^A-Z0-9.]", "", (text or "").upper())
     for tok, name in parse.BANK_TOKENS:          # an Indian bank's download
-        if len(tok) >= 4 and tok in compact:
+        if len(tok) >= 4 and re.search(rf"(?<![a-z]){re.escape(tok.lower())}(?![a-z])", t):
             return name
     return None
 
@@ -225,16 +226,12 @@ US_FILE_SOURCES = (parse.US_BANKS | {"Vanguard", "Robinhood", "E*TRADE", "Merril
 
 def classify(path: Path, home: str = "USD") -> str | None:
     """'bank' (activity), 'positions' (a broker's holdings) or None (not one of ours) for a statements file.
-    With rupees at home, only US banks' and brokers' files are ours: the holdings CSVs Indian apps export stay
-    with networth.import_holdings, read as before."""
+    With rupees at home, only files whose NAME says a US bank or broker (chase-1234.csv, fidelity-positions.csv)
+    are ours: every other CSV, like the holdings exports of Indian apps, stays with networth.import_holdings, read
+    as before."""
     kind = _classify(path)
-    if kind and home == "INR":
-        try:
-            head = path.read_text(errors="replace")[:3000]
-        except OSError:
-            return None
-        if _bank_from(path.stem) not in US_FILE_SOURCES and _bank_from(head) not in US_FILE_SOURCES:
-            return None
+    if kind and home == "INR" and _bank_from(path.stem) not in US_FILE_SOURCES:
+        return None
     return kind
 
 
@@ -399,10 +396,29 @@ _DESC_PREFIX = re.compile(
     r"PURCHASE|SQ \*|SQ\*|TST\* ?|PP\*|POS)\s*[-:]?\s*", re.I)
 
 
+# ACH descriptions carry fields that can hold the account holder's name or ids (Bank of America's "INDN:", "ID:",
+# "CO ID:", Chase's "IND NAME:", "IND ID:", "TRACE#:"). They're dropped before a row is stored, so they never
+# reach the page's text or Claude. "DES:" and "CO ENTRY DESCR:" stay: they say what the payment is (PAYROLL).
+_LABELS = (r"DES|INDN|IND ?NAME|IND ?ID|INDIVIDUAL ID|CO ID|ID|CO ENTRY DESCR|ORIG CO NAME|ORIG ID|ORIG CO ID|DESC DATE|"
+           r"SEC|TRACE ?#?|TRN|EED|PPD ID|WEB ID|CCD ID|CO NAME|RECEIVER|RECIPIENT")
+_PRIVATE = re.compile(
+    r"\s*\b(?:INDN|IND ?NAME|IND ?ID|INDIVIDUAL ID|CO ID|ORIG CO ID|ORIG ID|ID|TRACE ?#?|TRN|EED|PPD ID|WEB ID|"
+    rf"CCD ID|RECEIVER|RECIPIENT)\s*[:#]\s*.*?(?=\s+(?:{_LABELS})\s*[:#]|\s+(?:PPD|CCD|WEB)\s*$|$)", re.I)
+
+
+def scrub(desc: str) -> str:
+    """A bank's description without the fields that can name or identify the account holder:
+    'ACME CORP DES:PAYROLL ID:XXXXX INDN:JORDAN LEE CO ID:XXXXX PPD' -> 'ACME CORP DES:PAYROLL PPD'."""
+    return re.sub(r"\s+", " ", _PRIVATE.sub("", desc or "")).strip()
+
+
 def payee(desc: str) -> str | None:
     """A payee name from a bank's description: 'ZELLE PAYMENT TO MARIA GARCIA JPM99ABC' -> 'MARIA GARCIA',
     'PURCHASE AUTHORIZED ON 11/14 DEMO SHOP SEATTLE WA S300000000' -> 'DEMO SHOP SEATTLE WA'."""
     d = re.sub(r"\s+", " ", desc or "").strip()
+    o = re.search(rf"ORIG CO NAME\s*:\s*(.+?)(?=\s+(?:{_LABELS})\s*[:#]|$)", d, re.I)   # Chase's long ACH form
+    if o:
+        d = o.group(1)
     z = re.match(r"(?i)zelle (?:payment |transfer )?(?:to|from)\s+(.+?)(?:\s+(?:on|conf#|jpm\w*|ref\b|#).*)?$", d)
     if z:
         d = z.group(1)
@@ -444,8 +460,8 @@ def store_activity(conn: sqlite3.Connection, a: Activity, source_file: str, sett
             sym = money.symbol(home).strip()
             note = f"[{a.cur} {amt:g} ≈ {sym}{amt * rate:,.2f} at {sym}{rate:g}/{a.cur}, {src}] "
             amt = round(amt * rate, 2)
-        party = payee(t["desc"])
-        raw = f"{note}{t['desc']}"            # the file's name is in sender, so rules never match on it
+        party = payee(scrub(t["desc"]))
+        raw = f"{note}{scrub(t['desc'])}"     # the file's name is in sender, so rules never match on it
         cat = sync._category(direction, party or "", raw, amt, settings)
         cur = conn.execute(
             """INSERT OR IGNORE INTO transactions
@@ -473,12 +489,13 @@ def store_activity(conn: sqlite3.Connection, a: Activity, source_file: str, sett
 def _mark_alert_duplicate(conn: sqlite3.Connection, rowid: int, day: str, amount: float, direction: str,
                           last4: str | None) -> None:
     """A payment the bank's alert already reported: keep the alert (it has the payee and time), count this once.
-    Files carry the posting date, a few days after the alert; same amount, same card or account."""
+    Files carry the posting date, a few days after the alert; same amount, same card or account. The kept alert
+    may already have its text or email twin as a duplicate (sync._mark_duplicate): one file row joins them."""
     d = date.fromisoformat(day)
     row = conn.execute(
-        """SELECT id FROM transactions WHERE id != ? AND source != 'file' AND duplicate_of IS NULL AND direction = ?
+        """SELECT id FROM transactions k WHERE id != ? AND source != 'file' AND duplicate_of IS NULL AND direction = ?
            AND ABS(amount - ?) < 0.01 AND ts BETWEEN ? AND ? AND (last4 IS NULL OR ? IS NULL OR last4 = ?)
-           AND id NOT IN (SELECT duplicate_of FROM transactions WHERE duplicate_of IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM transactions d WHERE d.duplicate_of = k.id AND d.source = 'file')
            ORDER BY ABS(julianday(substr(ts, 1, 10)) - julianday(?)) LIMIT 1""",
         (rowid, direction, amount, (d - timedelta(days=5)).isoformat(), (d + timedelta(days=2)).isoformat() + "T99",
          last4, last4, day)).fetchone()

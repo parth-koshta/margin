@@ -56,6 +56,9 @@ US_DOMAINS = [
     ("key.com", "KeyBank"), ("regions.com", "Regions"), ("huntington.com", "Huntington"), ("chime.com", "Chime"),
     ("marcus.com", "Marcus"), ("citi.com", "Citi"), ("citibank.com", "Citi"), ("americanexpress.com", "Amex"),
 ]
+# Brokers: their mail is about money in a brokerage account (and, for Indian RSU or ESPP holders, a broker
+# abroad), so they count as banks only when the home currency isn't the rupee.
+US_BROKER_DOMAINS = {"schwab.com", "fidelity.com"}
 # US banks text from short codes. Only codes that are the bank's own; any other short code counts when its
 # text starts with a US bank's name ("Chase: ...", "BofA: ...") or once you trust it (margin trust 12345).
 US_SHORT_CODES = {"24273": "Chase", "73981": "Bank of America", "93557": "Wells Fargo"}
@@ -76,16 +79,19 @@ US_BANKS = {n for _, n in US_DOMAINS} | set(US_SHORT_CODES.values()) | set(_US_N
 US_BANKS -= {"Citi", "Amex"}
 
 
-def _us_domain(domain: str) -> str | None:
+def _us_domain(domain: str, home: str) -> str | None:
     for d, name in US_DOMAINS:
-        if domain == d or domain.endswith("." + d):
+        if (domain == d or domain.endswith("." + d)) and (home != "INR" or d not in US_BROKER_DOMAINS):
             return name
     return None
 
 
-def bank_for_sender(sender: str, extra_trusted: list[str] | None = None, text: str = "") -> str | None:
+def bank_for_sender(sender: str, extra_trusted: list[str] | None = None, text: str = "",
+                    home: str = "INR") -> str | None:
     """Return a bank name if this email/SMS sender is a bank, else None. `text` (the message) is only looked at
-    for SMS short codes: a US bank's text starts with its name."""
+    for SMS short codes: a US bank's text starts with its name. `home` is the home currency: with rupees at home,
+    US brokers aren't banks and a short code counts only once trusted."""
+    home = (home or "INR").upper()
     s = (sender or "").upper()
     domain = ""
     if "@" in s:
@@ -95,15 +101,15 @@ def bank_for_sender(sender: str, extra_trusted: list[str] | None = None, text: s
     for tok in extra_trusted or []:
         if tok.upper() in s_compact or tok.upper() in s:
             return tok
-    if domain and _us_domain(domain):
-        return _us_domain(domain)
+    if domain and _us_domain(domain, home):
+        return _us_domain(domain, home)
     if NOT_A_BANK.search(s_compact):
         return None          # a fund house, insurer or broker that shares a bank's name (SBIMF, Axis Max Life...)
     for tok, name in BANK_TOKENS:
         if tok in s_compact:
             return name
     code = (sender or "").strip()
-    if _SHORT_CODE.fullmatch(code):
+    if _SHORT_CODE.fullmatch(code) and home != "INR":
         if code in US_SHORT_CODES:
             return US_SHORT_CODES[code]
         m = _US_NAME_AT_START.match(text or "")

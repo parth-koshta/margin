@@ -47,18 +47,29 @@ SENDERS_SYSTEM = BASE + (
     "newsletters, offers and ads, OTP senders.\n"
     "verdict 'unsure': you can't tell from the name and examples.")
 
-UNREAD_SYSTEM = BASE + (
+_UNREAD_INTRO = (
     "Each item is a message from one of the person's banks that the tracker could not read.\n"
     "verdict 'payment': money actually moved in this message: a debit, credit, card spend, refund or reversal "
     "(a reversal or refund is direction 'in'). Give amount and currency exactly as written (e.g. 21.43 and "
     "'USD'; rupees are 'INR'), direction 'out' (money left) or 'in' (money came in), the payee or merchant name "
     "as written ('' if none), the last 4 digits of the card or account if shown ('' if not), and card=true when "
-    "it is a credit/debit card.\n"
+    "it is a credit/debit card.\n")
+# With rupees at home the instructions are as they always were: balance updates aren't recorded.
+UNREAD_SYSTEM_INR = BASE + _UNREAD_INTRO + (
+    "verdict 'not_payment': nothing was charged or credited in this message: OTPs, offers, statements, "
+    "reminders, 'will be debited' notices, mandate or AutoPay set-ups that only register (no charge), failed or "
+    "declined attempts, balance updates.\n"
+    "verdict 'unsure': can't tell, or the amount is masked or missing.")
+# Elsewhere a stated balance is recorded too: a checking or savings account's (money you have) and what's owed
+# on a credit card. Never a loan's: an outstanding loan balance is not money in the bank.
+UNREAD_SYSTEM = BASE + _UNREAD_INTRO + (
     "verdict 'balance': nothing moved, but the message states a bank account's balance (available or current "
     "balance; never a card's available credit or limit) or what is owed on a credit card (statement balance, total "
     "amount due, current card balance). Give amount and currency as written, the last 4 digits of that account or "
-    "card (if none is shown, answer 'unsure'), card=true when it is what is owed on a credit card, and due_date as "
-    "YYYY-MM-DD for a card statement's payment due date ('' if none).\n"
+    "card (if none is shown, answer 'unsure'), account_type ('checking', 'savings', 'credit_card'; 'loan' for a "
+    "loan, mortgage, line of credit or any other amount you owe that isn't a credit card; 'other' if unclear), "
+    "card=true when it is what is owed on a credit card, and due_date as YYYY-MM-DD for a card statement's payment "
+    "due date ('' if none).\n"
     "verdict 'not_payment': nothing was charged or credited and no balance is stated: OTPs, offers, reminders, "
     "'will be debited' notices, mandate or AutoPay set-ups that only register (no charge), failed or declined "
     "attempts.\n"
@@ -93,11 +104,18 @@ def _schema(props: dict, required: list[str]) -> dict:
 
 SENDERS_SCHEMA = _schema({"verdict": {"type": "string", "enum": ["bank", "not_bank", "unsure"]}}, ["verdict"])
 DOUBLES_SCHEMA = _schema({"verdict": {"type": "string", "enum": ["same", "different", "unsure"]}}, ["verdict"])
+UNREAD_SCHEMA_INR = _schema({
+    "verdict": {"type": "string", "enum": ["payment", "not_payment", "unsure"]},
+    "amount": {"type": "number"}, "currency": {"type": "string"},
+    "direction": {"type": "string", "enum": ["in", "out", ""]}, "payee": {"type": "string"},
+    "last4": {"type": "string"}, "card": {"type": "boolean"}}, ["verdict"])
 UNREAD_SCHEMA = _schema({
     "verdict": {"type": "string", "enum": ["payment", "balance", "not_payment", "unsure"]},
     "amount": {"type": "number"}, "currency": {"type": "string"},
     "direction": {"type": "string", "enum": ["in", "out", ""]}, "payee": {"type": "string"},
-    "last4": {"type": "string"}, "card": {"type": "boolean"}, "due_date": {"type": "string"}}, ["verdict"])
+    "last4": {"type": "string"}, "card": {"type": "boolean"}, "due_date": {"type": "string"},
+    "account_type": {"type": "string", "enum": ["checking", "savings", "credit_card", "loan", "other", ""]}},
+    ["verdict"])
 CATEGORIES_SCHEMA = _schema({"category": {"type": "string"},
                              "confidence": {"type": "string", "enum": ["high", "medium", "low"]}},
                             ["category", "confidence"])
@@ -204,7 +222,9 @@ def job_unread(conn, settings) -> tuple[int, str]:
         return 0, ""
     items = [{"id": str(i), "date": r["ts"][:16].replace("T", " "), "sender": r["sender"], "text": _mask(r["snippet"])}
              for i, r in enumerate(rows)]
-    decisions, err = _ask({"items": items}, UNREAD_SYSTEM, UNREAD_SCHEMA, settings)
+    inr = money.home(settings) == "INR"
+    decisions, err = _ask({"items": items}, UNREAD_SYSTEM_INR if inr else UNREAD_SYSTEM,
+                          UNREAD_SCHEMA_INR if inr else UNREAD_SCHEMA, settings)
     applied = 0
     for d in decisions:
         try:
@@ -222,8 +242,8 @@ def job_unread(conn, settings) -> tuple[int, str]:
         home = money.home(settings)
         cur = (d.get("currency") or home).upper().replace("RS", "INR").replace("₹", "INR")
         amt, direction = float(d.get("amount") or 0), d.get("direction")
-        bank = parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"], r["snippet"] or "")
-        if v == "balance":
+        bank = parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"], r["snippet"] or "", home)
+        if v == "balance" and not inr:
             applied += _unread_balance(conn, settings, r, d, keep, cur, amt, bank)
             continue
         rate, rate_src = fx.rate(conn, cur, home, r["ts"][:10], settings) if v == "payment" else (None, "")
@@ -257,17 +277,24 @@ def job_unread(conn, settings) -> tuple[int, str]:
 
 
 def _unread_balance(conn, settings, r, d, keep, cur, amt, bank) -> int:
-    """A balance Claude read: a bank account's goes to balances, what's owed on a card to card_dues (both count in
-    net worth). Returns 1 if recorded, 0 if left to the person (no ending, no bank, no rate)."""
+    """A balance Claude read: a checking or savings account's goes to balances, what's owed on a credit card to
+    card_dues (both count in net worth). Loans, outstanding amounts and anything unclear are never recorded: left
+    to the person. Returns 1 if recorded, 0 if not."""
     home, reason = money.home(settings), d.get("reason")
     last4 = re.sub(r"\D", "", d.get("last4") or "")[-4:] or None
-    rate = fx.rate(conn, cur, home, r["ts"][:10], settings)[0] if amt > 0 else None
+    kind = d.get("account_type") or ""
+    text = f"{r['snippet'] or ''} {reason or ''}"
+    owed_words = re.search(r"\b(?:loan|mortgage|line of credit|heloc|outstanding|principal|emi|overdraft)\b", text, re.I)
+    card = kind == "credit_card" and bool(d.get("card"))
+    deposit = kind in ("checking", "savings") and not d.get("card") and not owed_words
+    rate = fx.rate(conn, cur, home, r["ts"][:10], settings)[0] if amt > 0 and (card or deposit) else None
     label = f"{r['sender'][:40]} · {r['ts'][:10]}"
-    if not last4 or not bank or rate is None:
-        _record(conn, "unread", r["uid"], "unsure", label, reason or "no account ending or rate", {"review": keep})
+    if not last4 or not bank or rate is None or not (card or deposit):
+        why = reason if card or deposit else f"not a checking, savings or card balance ({kind or 'unclear'})"
+        _record(conn, "unread", r["uid"], "unsure", label, why or "no account ending or rate", {"review": keep})
         return 0
     value = round(amt * rate, 2)
-    if d.get("card"):
+    if card:
         account, table = sync._account_label(bank, "card", last4), "card_dues"
         due = d.get("due_date") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d.get("due_date") or "") else None
         conn.execute("INSERT OR REPLACE INTO card_dues VALUES(?,?,?,?)", (account, r["ts"], value, due))

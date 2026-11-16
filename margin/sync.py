@@ -98,9 +98,9 @@ def ingest(conn: sqlite3.Connection, msg: dict, source: str, settings: dict) -> 
     conn.execute("INSERT OR IGNORE INTO seen(uid) VALUES(?)", (uid,))
     ts = sms.iso_local(msg["ts_epoch"])
     text, subject = msg["text"], msg.get("subject", "")
-    bank = parse.bank_for_sender(msg["sender"], settings["trusted_senders"], text)
-    full_text = f"{subject} {text}"
     home = money.home(settings)
+    bank = parse.bank_for_sender(msg["sender"], settings["trusted_senders"], text, home)
+    full_text = f"{subject} {text}"
 
     if not bank:
         if source == "sms" and epf.is_epfo(msg["sender"]):   # EPF balance texts, even when EPFO's sender is hidden
@@ -171,14 +171,17 @@ def _mark_duplicate(conn, rowid, source, ts, amount, direction, last4) -> None:
     lo, hi = (t - timedelta(hours=36)).isoformat(), (t + timedelta(hours=36)).isoformat()
     # A downloaded statement (source 'file') has the posting date, up to a few days after the alert.
     flo, fhi = (t - timedelta(days=2)).date().isoformat(), (t + timedelta(days=5)).date().isoformat() + "T99"
+    # A kept payment takes at most one copy from each source (an email, a text and a downloaded statement can all
+    # report one spend). Without statement files this is exactly one copy: the kept row has none yet.
     row = conn.execute(
-        """SELECT id FROM transactions WHERE id != ? AND source != ? AND duplicate_of IS NULL
+        """SELECT id FROM transactions k WHERE id != ? AND source != ? AND duplicate_of IS NULL
            AND direction = ? AND ABS(amount - ?) < 0.01
            AND (ts BETWEEN ? AND ? OR (source = 'file' AND ts BETWEEN ? AND ?))
            AND (last4 IS NULL OR ? IS NULL OR last4 = ?)
-           AND id NOT IN (SELECT duplicate_of FROM transactions WHERE duplicate_of IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM transactions d WHERE d.duplicate_of = k.id AND (d.source = ?
+               OR (? != 'file' AND k.source != 'file' AND d.source != 'file')))
            ORDER BY ABS(julianday(ts) - julianday(?)) LIMIT 1""",
-        (rowid, source, direction, amount, lo, hi, flo, fhi, last4, last4, ts)).fetchone()
+        (rowid, source, direction, amount, lo, hi, flo, fhi, last4, last4, source, source, ts)).fetchone()
     if not row and amount >= 5000 and last4:
         # The same bank sometimes sends two different alerts for one large credit/debit (e.g. SBI's
         # "credit for ... REFUND" and "An IT Refund amount ... has been credited"). Same account, same
@@ -249,7 +252,7 @@ def reparse_parties(conn: sqlite3.Connection, settings: dict) -> int:
         raw = r["raw"] or ""
         us_by_claude = cur(r) == "USD" and raw.startswith("[read by Claude]")   # Claude already judged it a payment
         if ((not us_by_claude and parse.is_not_payment(parse.normalize(raw), cur(r)))
-                or not parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"], raw)):
+                or not parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"], raw, home)):
             conn.execute("UPDATE transactions SET duplicate_of=NULL WHERE duplicate_of=?", (r["id"],))
             conn.execute("DELETE FROM transactions WHERE id=?", (r["id"],))
             fixed += 1
@@ -297,7 +300,7 @@ def retry_review(conn: sqlite3.Connection, settings: dict) -> int:
     alerts are left alone: that reader's patterns didn't change."""
     home, n = money.home(settings), 0
     for r in conn.execute("SELECT * FROM review").fetchall():
-        bank = parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"], r["snippet"] or "")
+        bank = parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"], r["snippet"] or "", home)
         if not bank or parse.currency_for(bank, home) != "USD" or ":" not in r["uid"]:
             continue
         msg = {"id": r["uid"].split(":", 1)[1], "sender": r["sender"] or "", "subject": "", "text": r["snippet"] or "",
@@ -380,7 +383,7 @@ def run(quiet_notify: bool = False) -> int:
         after = int(cursor) if cursor is not None else sms.max_rowid_before(backfill_epoch)
         newest = after
         try:
-            for m in sms.fetch_since(after):
+            for m in sms.fetch_since(after, sms.short_codes_for(settings)):
                 newest = max(newest, m["rowid"])
                 if f"sms:{m['id']}" in seen:
                     continue

@@ -181,8 +181,9 @@ def trust_sender(conn: sqlite3.Connection, settings: dict, token: str) -> int:
     if emails:
         queued = json.loads(db.get_state(conn, "refetch_email_ids") or "[]")
         db.set_state(conn, "refetch_email_ids", json.dumps(sorted(set(queued) | set(emails))))
-    if any(r["source"] == "sms" for r in rows):
-        conn.execute("DELETE FROM state WHERE key='sms_after_rowid'")   # re-scan texts; 'seen' skips the rest
+    if any(r["source"] == "sms" for r in rows) or re.fullmatch(r"\d{5,6}", token.strip()):
+        # re-scan texts ('seen' skips the rest); a short code may never have been read before it was trusted
+        conn.execute("DELETE FROM state WHERE key='sms_after_rowid'")
     for r in rows:
         conn.execute("DELETE FROM seen WHERE uid=?", (r["uid"],))
         conn.execute("DELETE FROM review WHERE uid=?", (r["uid"],))

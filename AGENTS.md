@@ -112,7 +112,8 @@ No iPhone or texts don't reach the Mac: `"read_sms": false`.
 Margin reads texts from service senders only: Indian bank IDs (`JD-HDFCBK-S`) and US short codes (5 or 6 digits).
 Texts from phone numbers (people) are never read. Chase (24273), Bank of America (73981) and Wells Fargo (93557)
 are known; any other short code counts when its text starts with a US bank's name ("Capital One: ..."), or once
-they trust it (`margin trust 55512`).
+they trust it (`margin trust 55512`). With rupees at home, short codes are read only once trusted, and US brokers
+(Schwab, Fidelity) aren't treated as banks, so RSU or ESPP mail never counts as income.
 
 ### 5. Statements (they type the passwords)
 
@@ -140,6 +141,11 @@ In the US (no passwords; they download, you check):
   holdings. Accounts named IRA, Roth, 401(k), 403(b), 457, SEP, SIMPLE or TSP count as Retirement; if the file
   doesn't say (Vanguard), put it in the file name (`vanguard-roth-ira.csv`). The newest file per account wins.
 - A 401(k) plan with no download: its value in `other_investments` (kind `retirement`), updated now and then.
+- With rupees at home (someone in India with a US account), a US file is read only when its file name says the
+  bank or broker (`chase-checking-1234.csv`, `fidelity-positions.csv`); every other CSV is read as before.
+
+Rows from bank files are stored without the fields that can carry the account holder's name or ids (`INDN:`,
+`ID:`, `CO ID:`, `IND NAME:`, `TRACE#:`...), so those never reach the page's text or Claude.
 
 Check after the next `margin sync`: `margin doctor`, then the page's Net worth and Investments. Notes about files
 that couldn't be read show in the sync's problems ("Statements: ...").
@@ -187,7 +193,7 @@ next morning, "Updated … 12:0x am" at the top of the page.
   comparing counts and totals only.
 - **A bank or broker download Margin can't read** (`margin/imports.py`): the column names it knows are listed near
   the top (`DATE_COLS`, `AMOUNT_COLS`, `SYMBOL_COLS`...); add the bank's, with a made-up file in
-  `tests/test_us.py`. Ask the person for the header line only, never the rows.
+  `tests/test_files.py`. Ask the person for the header line only, never the rows.
 - **Categories for local merchants** belong in the person's own `rules.json` (via Sort out or `margin rule`), not
   in `margin/categorize.py`, which holds only well-known national brands.
 - **Currencies**: `margin/money.py` lists symbols, decimals and locales; add one there if it's missing.
