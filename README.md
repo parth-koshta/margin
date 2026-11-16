@@ -32,8 +32,8 @@ This opens <http://demo.margin.localhost:8765/> on a made-up person's money: Jor
 plays a pretend sync, “Ask Claude to sort now” and the reviews are answered by a stand-in, and `--lock` starts
 at the lock screen with a simulated Touch ID. The demo lives in `~/Library/Caches/Margin Demo/`, rebuilds
 itself each day so it always ends today, and whenever Margin's code changes (`--fresh` rebuilds now). It never
-touches real data or the internet. `--app` opens it in the Margin app's own window instead of the browser
-(closing the window stops the demo).
+touches real data or the internet. `--app` opens it in the Margin app's own window, with Margin in the menu bar,
+instead of the browser (quitting the app stops the demo).
 Use it for screenshots and videos: it's the only Margin that should ever be on screen in public.
 
 ## Set it up
@@ -58,6 +58,11 @@ command line tools (`xcode-select --install`, which also provides Python 3.9+ an
   kept on disk (no history, cache, cookies or autofill), browser extensions can't see it, and links to other sites
   open in your browser. It reads the page's key from your data folder and hands it over in a private cookie, never
   in an address. Without the Xcode command line tools, the Margin app opens the page in your browser instead.
+- **The menu bar** shows only Margin's m, never a figure (anyone near your screen, or a screen recording, sees the
+  menu bar). Click it for a quick glance: spent today, this month against last, net worth, what's waiting in Sort
+  out and the last sync, with Sync now, Lock and Open Margin. The figures are fetched while it's open and dropped
+  when it closes; while Margin is locked it shows none, only "Unlock with Touch ID". Closing the window keeps
+  Margin in the menu bar; Quit ends it. "Open at Login" in its ⋯ menu is off until you turn it on.
 - **The page** at <http://margin.localhost/> is served by a tiny server on your Mac only (127.0.0.1 and ::1, not
   reachable from other machines). `*.localhost` always means your own Mac, so nothing on a shared Wi-Fi can
   pretend to be it, and Chrome treats it as secure. A secret key is handed to your browser once and kept in a
@@ -81,7 +86,7 @@ command line tools (`xcode-select --install`, which also provides Python 3.9+ an
 
 | Command | What it does |
 |---|---|
-| The Margin app (Spotlight); in a browser `margin open`, then <http://margin.localhost/> | Home, Spending, Investments, Sort out, Reviews, Sync now |
+| The Margin app (Spotlight), its m in the menu bar; in a browser `margin open`, then <http://margin.localhost/> | Home, Spending, Investments, Sort out, Reviews, Sync now; a quick glance from the menu bar |
 | `margin sync` | Sync now instead of waiting for midnight (or watch a running sync) |
 | `margin doctor` | Check that everything works |
 | `margin rule "swiggy" "Food & dining"` | Put matching payees in a category (past and future) |

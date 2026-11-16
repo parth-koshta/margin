@@ -44,6 +44,38 @@ class InfoPlist(unittest.TestCase):
 
     def test_demo_copy_has_its_own_identity(self):
         self.assertNotEqual(macapp.BUNDLE_ID, macapp.DEMO_BUNDLE_ID)
+        self.assertFalse(macapp.info_plist("http://margin.localhost/", Path("k"), macapp.BUNDLE_ID)["MarginDemo"])
+        self.assertTrue(macapp.info_plist("http://demo.margin.localhost:8765/", Path("k"), macapp.DEMO_BUNDLE_ID,
+                                          demo=True)["MarginDemo"])
+
+
+class MenuBarIcon(unittest.TestCase):
+    """The menu bar's m: icon.py's shape, black on clear (a template), centred, and only a picture."""
+
+    def pixels(self, px):
+        import struct
+        import zlib
+        data = macapp.menu_bar_png(px)
+        self.assertTrue(data.startswith(b"\x89PNG"))
+        w, h, depth, kind = struct.unpack(">IIBB", data[16:26])
+        self.assertEqual((w, h, depth, kind), (px, px, 8, 4))           # grey + alpha
+        i = data.index(b"IDAT")
+        raw = zlib.decompress(data[i + 4:i + 4 + struct.unpack(">I", data[i - 4:i])[0]])
+        rows = [raw[r * (1 + 2 * px) + 1:(r + 1) * (1 + 2 * px)] for r in range(px)]
+        return [[(row[2 * x], row[2 * x + 1]) for x in range(px)] for row in rows]
+
+    def test_black_glyph_on_clear_and_centred(self):
+        px = self.pixels(36)
+        self.assertTrue(all(g == 0 for row in px for g, _ in row))       # colour comes from macOS (template)
+        self.assertEqual(px[0][0][1], 0)                                 # corners clear: no tile
+        lit = [(x, y) for y, row in enumerate(px) for x, (_, a) in enumerate(row) if a]
+        xs, ys = [x for x, _ in lit], [y for _, y in lit]
+        self.assertLessEqual(abs(min(xs) - (35 - max(xs))), 2)
+        self.assertLessEqual(abs(min(ys) - (35 - max(ys))), 2)
+        self.assertGreater(len(lit), 200)
+
+    def test_both_sizes_go_in_the_bundle(self):
+        self.assertEqual(len(self.pixels(macapp.MENU_PT)), 18)
 
 
 class Build(unittest.TestCase):
@@ -73,6 +105,8 @@ class Build(unittest.TestCase):
         self.assertFalse((app / "Contents" / "Resources" / "applet.icns").exists())
         self.assertEqual(macapp.executable(app).read_bytes(), b"program")
         self.assertTrue((app / "Contents" / "Resources" / "Margin.icns").exists())
+        for name in ("MenuBarIcon.png", "MenuBarIcon@2x.png"):
+            self.assertTrue((app / "Contents" / "Resources" / name).exists())
         with open(app / "Contents" / "Info.plist", "rb") as f:
             self.assertEqual(plistlib.load(f)["MarginURL"], "http://margin.localhost/")
         self.assertFalse((self.tmp / ".Margin.app.new").exists())
@@ -146,6 +180,7 @@ class DemoWindow(unittest.TestCase):
         self.assertEqual(bundle_id, macapp.DEMO_BUNDLE_ID)
         self.assertTrue(url.startswith(f"http://{self.demo.HOST}:"))
         self.assertEqual(build.call_args[1]["fix"], "margin demo --app")
+        self.assertTrue(build.call_args[1]["demo"])
         self.assertEqual(Path(key_file).read_text(), self.demo.KEY)
         self.assertEqual(popen.call_args[0][0][1:], ["--port", "8767"])
 
@@ -170,6 +205,14 @@ class SwiftSource(unittest.TestCase):
         self.assertIn("sameSiteStrict", src)
         self.assertNotIn("?k=", src)
         self.assertNotIn("isInspectable = true", src)
+
+    def test_menu_bar_shows_only_the_m_and_the_panel_drops_figures_on_close(self):
+        src = macapp.SOURCE.read_text()
+        self.assertIn("image?.isTemplate = true", src)
+        self.assertNotIn("button.title =", src)                  # never a figure in the menu bar itself
+        self.assertIn('client.call("api/glance")', src)
+        self.assertIn("render(.empty)", src)
+        self.assertIn("case 423: self.render(.locked(nil))", src)
 
 
 if __name__ == "__main__":

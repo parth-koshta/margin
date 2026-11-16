@@ -13,8 +13,10 @@ from __future__ import annotations
 import os
 import plistlib
 import shutil
+import struct
 import subprocess
 import urllib.parse
+import zlib
 from pathlib import Path
 
 from . import paths
@@ -42,7 +44,7 @@ def this_mac(url: str) -> bool:
     return u.scheme == "http" and (host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost"))
 
 
-def info_plist(url: str, key_file: Path, bundle_id: str, fix: str = "margin app install") -> dict:
+def info_plist(url: str, key_file: Path, bundle_id: str, fix: str = "margin app install", demo: bool = False) -> dict:
     return {
         "CFBundleName": "Margin",
         "CFBundleExecutable": EXECUTABLE,
@@ -64,10 +66,38 @@ def info_plist(url: str, key_file: Path, bundle_id: str, fix: str = "margin app 
         "MarginURL": url,                      # where the page is (only the port can be changed, with --port)
         "MarginKeyFile": str(key_file),        # the key itself is read from here when the app opens, never stored
         "MarginFix": fix,                      # what the app tells you to run when the page doesn't answer
+        "MarginDemo": demo,                    # the demo's copy: no "Open at Login", labelled as the demo
     }
 
 
-def build(app: Path, url: str, key_file: Path, bundle_id: str = BUNDLE_ID, fix: str = "margin app install") -> Path:
+MENU_ICON = "MenuBarIcon"          # Resources/MenuBarIcon.png and @2x: the menu bar's m
+MENU_PT = 18                       # points; macOS menu bar icons are about this size
+MENU_FRAME = (6.0, 6.1, 20.0)      # x, y and side of the square cut from icon.py's 32 grid around the m
+
+
+def menu_bar_png(px: int) -> bytes:
+    """Margin's m alone, black on clear, for the menu bar. The app marks it as a template image, so macOS draws it
+    in the menu bar's own colour (light, dark, or tinted). The shape is icon.py's, so the two always match; the
+    figures are never in the menu bar, only behind a click."""
+    from . import icon
+    x0, y0, side = MENU_FRAME
+    n, scale = 4, side / px
+    rows = bytearray()
+    for py in range(px):
+        rows.append(0)
+        for qx in range(px):
+            hits = sum(icon._in_m(x0 + (qx + (sx + .5) / n) * scale, y0 + (py + (sy + .5) / n) * scale)
+                       for sy in range(n) for sx in range(n))
+            rows += bytes((0, round(255 * hits / (n * n))))       # grey 0 (black), alpha = coverage
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", px, px, 8, 4, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b""))
+
+
+def build(app: Path, url: str, key_file: Path, bundle_id: str = BUNDLE_ID, fix: str = "margin app install",
+          demo: bool = False) -> Path:
     """Compile and put together the app at `app` (a .app path), replacing what's there. Raises RuntimeError."""
     if not this_mac(url):
         raise RuntimeError(f"the app only opens pages on this Mac, not {url}")
@@ -87,8 +117,10 @@ def build(app: Path, url: str, key_file: Path, bundle_id: str = BUNDLE_ID, fix: 
             raise RuntimeError(f"swiftc couldn't build the app: {r.stderr.strip()[:400]}")
         from . import icon
         icon.write_icns(str(res / "Margin.icns"))
+        (res / f"{MENU_ICON}.png").write_bytes(menu_bar_png(MENU_PT))
+        (res / f"{MENU_ICON}@2x.png").write_bytes(menu_bar_png(MENU_PT * 2))
         with open(new / "Contents" / "Info.plist", "wb") as f:
-            plistlib.dump(info_plist(url, key_file, bundle_id, fix), f)
+            plistlib.dump(info_plist(url, key_file, bundle_id, fix, demo), f)
         (new / "Contents" / "PkgInfo").write_text("APPL????")
         r = subprocess.run(["codesign", "--force", "--sign", "-", str(new)], capture_output=True, text=True)
         if r.returncode != 0:

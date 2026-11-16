@@ -694,7 +694,8 @@ def open_app(port: int) -> subprocess.Popen:
                              "Or leave out --app to use the browser.")
         print("Building the Margin app window for the demo (once)…", flush=True)
         try:
-            macapp.build(app, f"http://{HOST}:8765/", key_file, macapp.DEMO_BUNDLE_ID, fix="margin demo --app")
+            macapp.build(app, f"http://{HOST}:8765/", key_file, macapp.DEMO_BUNDLE_ID, fix="margin demo --app",
+                         demo=True)
         except RuntimeError as e:
             raise SystemExit(f"Couldn't build the app window: {e}")
     return subprocess.Popen([str(macapp.executable(app)), "--port", str(port)],
@@ -733,7 +734,8 @@ def serve(port: int = 8765, open_browser: bool = True, locked: bool = False, app
     window = None
     if app:
         window = open_app(port)
-        print("Opened in the Margin app window. Closing it stops the demo.", flush=True)
+        print("Opened in the Margin app window, with Margin in the menu bar. Quitting the app (⌘Q, or Quit in its "
+              "menu bar panel) stops the demo.", flush=True)
 
         def stop_with_window():
             window.wait()

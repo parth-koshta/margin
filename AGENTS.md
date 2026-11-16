@@ -133,6 +133,10 @@ sites can read the page in a tab, and a tab leaves it in the browser's history a
 command line tools, `margin app install` makes a small app that opens the browser instead; run it again once
 they're installed. `margin app remove` removes the app and the page service.
 
+The app also puts Margin's m in the menu bar: a click shows a quick glance (spent today, this month, net worth,
+Sort out, last sync) from `/api/glance`, and nothing while Margin is locked. Closing the window keeps it there.
+Starting at login is their choice: **Open at Login** in the panel's ⋯ menu. Don't turn it on for them.
+
 ### 7. Sort out (they decide; 15 minutes)
 
 In the page's **Sort out**: pick categories for the biggest payees (each becomes a rule), mark unknown senders as
@@ -180,7 +184,7 @@ service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the 
 | `invest.py`, `cas.py`, `nps.py`, `usstocks.py`, `epf.py`, `fd.py`, `ppf.py`, `prices.py` | Investments |
 | `networth.py`, `tidy.py` | Net worth; Sort out logic |
 | `server.py`, `dashboard.py`, `icon.py`, `lock.py`, `touchid.swift` | The local page, its server and the Touch ID lock |
-| `macapp.py`, `macapp.swift` | The Margin app: the page in its own window (AppKit + WebKit), built with swiftc |
+| `macapp.py`, `macapp.swift`, `glance.py` | The Margin app: the page in its own window and the menu bar glance (AppKit + WebKit, built with swiftc); the glance's figures |
 | `pdf.py`, `pdftext.swift`, `keychain.py` | Locked PDFs via PDFKit; Keychain secrets |
 | `demo.py` | The made-up demo people and the stand-ins for Claude, sync and Touch ID |
 | `privacy.py`, `.githooks/` | The leak guard |
