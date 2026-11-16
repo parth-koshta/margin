@@ -1,8 +1,9 @@
 """Margin's demo: the real app on a made-up person's money, for trying Margin out, screenshots and videos.
 
 `margin demo` builds a complete invented data folder and serves it at http://demo.margin.localhost:8765/:
-- by default a US person in dollars (Jordan Lee, Seattle): paycheck, rent, card spends, a London trip paid in
-  pounds, stocks & ETFs, a 401(k), an IRA, savings and a CD;
+- by default a US person in dollars (Jordan Lee, Seattle): paycheck, rent, card spends, Zelle, a London trip paid
+  in pounds, stocks & ETFs, a 401(k), an IRA, savings and a CD; the bank's alerts are written the way US banks
+  word them and read by Margin's own reader, like real ones;
 - with --india an Indian person in rupees (Kavya Menon, Kochi): bank texts, a USD subscription, Indian stocks, mutual
   funds, US stocks, NPS, EPF, PPF and a fixed deposit.
 Each has 14 months of spending, two years of investment history, spending and investment reviews and Sort out items.
@@ -185,21 +186,40 @@ US_SORT_OUT = [("JOE'S PIZZA", 18, 42, "out"), ("GREENLEAF DRY CLEANERS", 16, 48
 
 
 def _us_money(conn, settings, rnd, today, now) -> None:
-    from . import ai, db
+    """Jordan's bank alerts, written the way US banks word them and read by Margin's own reader (sync.ingest)."""
+    from . import ai, db, sync
     book = _Book(conn, settings, now)
-    CHK, CARD = "Chase checking ••1234", "Chase Sapphire ••9876"
+    CHK, CARD = "Chase a/c ••1234", "Chase card ••9876"      # what the reader names the two accounts
+    seq = [0]
 
-    def pay(when, amount, payee, account=CARD, direction="out", note=""):
+    def alert(when: datetime, body: str) -> None:
+        if when > now:
+            return
+        seq[0] += 1
+        sync.ingest(conn, {"id": f"demo{seq[0]}", "sender": "Chase <no.reply.alerts@chase.com>", "subject": "",
+                           "ts_epoch": when.timestamp(), "text": body}, "email", settings)
+
+    def pay(when, amount, payee, account=CARD, direction="out", balance=None):
         amount = round(amount, 2)
-        verb = "Purchase" if account == CARD else ("Payment" if direction == "out" else "Deposit")
-        book.add(when, amount, direction, payee, account,
-                 f"{note}{verb} of ${amount:,.2f} {'at' if direction == 'out' else 'from'} {payee} on "
-                 f"{when:%b %d, %Y}, {account}.", sender="no.reply.alerts@chase.example", bank="Chase")
+        bal = f" Available balance ${balance:,.2f}." if balance is not None else ""
+        if account == CARD and direction == "out":
+            alert(when, f"Chase: You made a ${amount:,.2f} transaction with {payee} on your card ending in 9876.")
+        elif account == CARD:
+            alert(when, f"Chase: A refund of ${amount:,.2f} from {payee} was credited to your card ending in 9876.")
+        elif payee in ("MARIA GARCIA", "ALEX RIVERA"):                # Zelle, to and from friends
+            alert(when, f"Zelle: You sent ${amount:,.2f} to {payee}. Account ending in 1234." if direction == "out"
+                  else f"Zelle: {payee} sent you ${amount:,.2f}. It's in your account ending in 1234.")
+        elif direction == "out":
+            alert(when, f"Chase: Your payment of ${amount:,.2f} to {payee} was sent from your account ending in 1234.")
+        else:
+            alert(when, f"Chase: A deposit of ${amount:,.2f} from {payee} posted to your account ending in 1234.{bal}")
 
-    def abroad(when, gbp, payee):
+    def abroad(when, gbp, payee):        # alerts in pounds: read by Claude, converted at the day's rate
         rate = 1.27
         note = ai.fx_note("GBP", gbp, round(gbp * rate, 2), rate, f"ECB rate for {when:%Y-%m-%d}", "USD").strip()
-        pay(when, gbp * rate, payee, note=f"[read by Claude] {note} ")
+        book.add(when, round(gbp * rate, 2), "out", payee, CARD,
+                 f"[read by Claude] {note} Chase: You made a £{gbp:,.2f} transaction with {payee} on your card ending "
+                 f"in 9876.", sender="Chase <no.reply.alerts@chase.com>", bank="Chase")
 
     start = today - timedelta(days=425)
     london = today - timedelta(days=70)
@@ -215,9 +235,7 @@ def _us_money(conn, settings, rnd, today, now) -> None:
         if last_day:
             paycheck = 7850 if d < today - timedelta(days=200) else 8400              # a raise in the spring
             bal += paycheck - rnd.randint(6400, 7900)
-            pay(at(6, 10), paycheck, "ACME CORP PAYROLL", CHK, "in")
-            conn.execute("INSERT OR REPLACE INTO balances VALUES (?,?,?,?)",
-                         (CHK, at(6, 10).isoformat(timespec="seconds"), round(bal, 2), "email"))
+            pay(at(6, 10), paycheck, "ACME CORP PAYROLL", CHK, "in", balance=round(bal, 2))   # the balance too
             pay(at(23, 0), rnd.uniform(64, 72), "ALLY BANK INTEREST", CHK, "in")
         if d.day == 1:
             pay(at(8, 40), 2350, "PARKSIDE APARTMENTS", CHK)
@@ -238,7 +256,7 @@ def _us_money(conn, settings, rnd, today, now) -> None:
         if d.day in (14, 28) and rnd.random() < .5:
             pay(at(11, 0), rnd.uniform(85, 260), "COSTCO")
         if d.day == 18 and rnd.random() < .4:
-            pay(at(12, 0), rnd.uniform(12, 90), "AMAZON REFUND", CARD, "in")
+            pay(at(12, 0), rnd.uniform(12, 90), "AMAZON", CARD, "in")
         if d == today - timedelta(days=150):
             pay(at(17, 45), 1299.00, "APPLE STORE")
         if d == today - timedelta(days=210):
@@ -266,9 +284,8 @@ def _us_money(conn, settings, rnd, today, now) -> None:
         conn.execute("INSERT OR REPLACE INTO review VALUES (?,?,?,?,?,?)",
                      (f"demo-rev{i}", "email", sender, (now - timedelta(days=2 + i)).isoformat(timespec="seconds"),
                       "sender isn't a known bank (not counted)", text))
-    conn.execute("INSERT OR REPLACE INTO card_dues VALUES (?,?,?,?)",
-                 (CARD, (now - timedelta(days=6)).isoformat(timespec="seconds"), 2431.18,
-                  (today + timedelta(days=9)).isoformat()))
+    alert(now - timedelta(days=6), "Your Chase card statement is ready. Statement balance: $2,431.18. Minimum "
+          f"payment due: $40.00. Payment due date: {today + timedelta(days=9):%m/%d/%Y}. Credit card ending in 9876.")
     _prices(conn, rnd, today, {"VOO": 541.7, "VTI": 290.2, "COST": 912.6, "JPM": 248.3, "V": 331.8}, "USD")
     _benchmarks(conn, rnd, today)
     stamp = now.isoformat(timespec="seconds")
