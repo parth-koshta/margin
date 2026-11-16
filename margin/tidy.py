@@ -14,7 +14,7 @@ import re
 import sqlite3
 import sys
 
-from . import categorize, db, parse, paths, sync
+from . import categorize, db, money, parse, paths, sync
 
 SPEND = ["Food & dining", "Groceries", "Shopping", "Transport", "Car", "Travel", "Rent & housing",
          "Bills & utilities", "Subscriptions", "Home services", "Medical", "Health & fitness", "Entertainment",
@@ -101,7 +101,7 @@ def sender_list(conn: sqlite3.Connection, settings: dict) -> list[dict]:
             continue
         g = groups.setdefault(key, {"key": key, "n": 0, "pay": 0, "example": None, "any": r["snippet"], "last": r["ts"][:10]})
         g["n"] += 1
-        if parse.parse_alert(r["snippet"] or "", "").txns:
+        if parse.parse_alert(r["snippet"] or "", "", parse.currency_for(None, money.home(settings))).txns:
             g["pay"] += 1
             g["example"] = g["example"] or r["snippet"]
     out = sorted(groups.values(), key=lambda g: (-g["pay"], -g["n"]))
@@ -207,7 +207,7 @@ def senders(conn: sqlite3.Connection, settings: dict) -> tuple[int, int, int]:
             continue
         g = groups.setdefault(key, {"n": 0, "pay": 0, "example": None, "label": r["sender"]})
         g["n"] += 1
-        if parse.parse_alert(r["snippet"] or "", "").txns:
+        if parse.parse_alert(r["snippet"] or "", "", parse.currency_for(None, money.home(settings))).txns:
             g["pay"] += 1
             g["example"] = g["example"] or r["snippet"]
         g["example_any"] = g.get("example_any") or r["snippet"]

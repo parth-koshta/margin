@@ -98,30 +98,32 @@ def ingest(conn: sqlite3.Connection, msg: dict, source: str, settings: dict) -> 
     conn.execute("INSERT OR IGNORE INTO seen(uid) VALUES(?)", (uid,))
     ts = sms.iso_local(msg["ts_epoch"])
     text, subject = msg["text"], msg.get("subject", "")
-    bank = parse.bank_for_sender(msg["sender"], settings["trusted_senders"])
+    bank = parse.bank_for_sender(msg["sender"], settings["trusted_senders"], text)
     full_text = f"{subject} {text}"
+    home = money.home(settings)
 
     if not bank:
         if source == "sms" and epf.is_epfo(msg["sender"]):   # EPF balance texts, even when EPFO's sender is hidden
             return "info" if epf.store(conn, uid, ts, text) else "skip"
         if parse.sender_key(msg["sender"]) in settings["ignored_senders"]:
             return "skip"
-        if parse.looks_financial(full_text):
+        if parse.looks_financial(full_text, home):
             conn.execute("INSERT OR REPLACE INTO review VALUES(?,?,?,?,?,?)",
                          (uid, source, msg["sender"][:80], ts, "sender isn't a known bank (not counted)",
                           _snippet(full_text)))
             return "review"
         return "skip"
 
-    res = parse.parse_alert(text, subject)
-    # Bank texts are read in rupees. With another home currency, convert at the day's rate and keep the original.
-    home = money.home(settings)
-    rate, rate_src = (1.0, "") if home == "INR" else fx.rate(conn, "INR", home, ts[:10], settings)
+    # Each bank's alerts are read in its own currency (Indian banks rupees, US banks dollars). In another home
+    # currency they're converted at the day's rate and keep the original.
+    cur = parse.currency_for(bank, home)
+    res = parse.parse_alert(text, subject, cur)
+    rate, rate_src = (1.0, "") if home == cur else fx.rate(conn, cur, home, ts[:10], settings)
     if rate is None and (res.txns or res.balance is not None or res.statement_due is not None):
         conn.execute("INSERT OR REPLACE INTO review VALUES(?,?,?,?,?,?)",
-                     (uid, source, msg["sender"][:80], ts, f"no INR->{home} rate yet", _snippet(full_text)))
+                     (uid, source, msg["sender"][:80], ts, f"no {cur}->{home} rate yet", _snippet(full_text)))
         return "review"
-    conv = (lambda x: x) if home == "INR" else (lambda x: None if x is None else round(x * rate, 2))
+    conv = (lambda x: x) if home == cur else (lambda x: None if x is None else round(x * rate, 2))
     res.statement_due, res.balance = conv(res.statement_due), conv(res.balance)
     if res.statement_due is not None and res.last4:
         conn.execute("INSERT OR REPLACE INTO card_dues VALUES(?,?,?,?)",
@@ -132,7 +134,7 @@ def ingest(conn: sqlite3.Connection, msg: dict, source: str, settings: dict) -> 
             conn.execute("INSERT OR REPLACE INTO balances VALUES(?,?,?,?)",
                          (_account_label(bank, "account", res.last4), ts, res.balance, source))
             return "info"
-        if parse.looks_financial(full_text):
+        if parse.looks_financial(full_text, home):
             conn.execute("INSERT OR REPLACE INTO review VALUES(?,?,?,?,?,?)",
                          (uid, source, msg["sender"][:80], ts, res.reason or "couldn't read", _snippet(full_text)))
             return "review"
@@ -140,9 +142,9 @@ def ingest(conn: sqlite3.Connection, msg: dict, source: str, settings: dict) -> 
 
     for n, t in enumerate(res.txns):
         note = ""
-        if home != "INR":
+        if home != cur:
             sym = money.symbol(home).strip()
-            note = f"[INR {t.amount:g} ≈ {sym}{t.amount * rate:,.2f} at {sym}{rate:g}/INR, {rate_src}] "
+            note = f"[{cur} {t.amount:g} ≈ {sym}{t.amount * rate:,.2f} at {sym}{rate:g}/{cur}, {rate_src}] "
             t.amount, t.balance = round(t.amount * rate, 2), conv(t.balance)
         party = " ".join(x for x in (t.counterparty, t.vpa) if x)
         cat = _category(t.direction, party, full_text, t.amount, settings)
@@ -167,13 +169,16 @@ def _mark_duplicate(conn, rowid, source, ts, amount, direction, last4) -> None:
     """The same spend often arrives as both an email and an SMS: keep the first, flag the second."""
     t = datetime.fromisoformat(ts)
     lo, hi = (t - timedelta(hours=36)).isoformat(), (t + timedelta(hours=36)).isoformat()
+    # A downloaded statement (source 'file') has the posting date, up to a few days after the alert.
+    flo, fhi = (t - timedelta(days=2)).date().isoformat(), (t + timedelta(days=5)).date().isoformat() + "T99"
     row = conn.execute(
         """SELECT id FROM transactions WHERE id != ? AND source != ? AND duplicate_of IS NULL
-           AND direction = ? AND ABS(amount - ?) < 0.01 AND ts BETWEEN ? AND ?
+           AND direction = ? AND ABS(amount - ?) < 0.01
+           AND (ts BETWEEN ? AND ? OR (source = 'file' AND ts BETWEEN ? AND ?))
            AND (last4 IS NULL OR ? IS NULL OR last4 = ?)
            AND id NOT IN (SELECT duplicate_of FROM transactions WHERE duplicate_of IS NOT NULL)
            ORDER BY ABS(julianday(ts) - julianday(?)) LIMIT 1""",
-        (rowid, source, direction, amount, lo, hi, last4, last4, ts)).fetchone()
+        (rowid, source, direction, amount, lo, hi, flo, fhi, last4, last4, ts)).fetchone()
     if not row and amount >= 5000 and last4:
         # The same bank sometimes sends two different alerts for one large credit/debit (e.g. SBI's
         # "credit for ... REFUND" and "An IT Refund amount ... has been credited"). Same account, same
@@ -228,31 +233,39 @@ def recategorize(conn: sqlite3.Connection, settings: dict) -> int:
 
 
 def reparse_parties(conn: sqlite3.Connection, settings: dict) -> int:
-    """Re-read payees of stored transactions that have none or a junk one, with the current parser."""
+    """Re-read payees of stored transactions that have none or a junk one, with the current parser. Each alert is
+    read in its bank's currency (parse.currency_for). Payments read from statement files (source 'file') aren't
+    alerts and are left alone."""
     fixed = 0
-    rows = [r for r in conn.execute("SELECT id, raw, amount, direction, counterparty, vpa, last4 FROM transactions")
+    home = money.home(settings)
+    cur = lambda r: parse.currency_for(r["bank"], home)   # noqa: E731
+    rows = [r for r in conn.execute("SELECT id, raw, bank, amount, direction, counterparty, vpa, last4 FROM transactions "
+                                    "WHERE source != 'file'")
             if not (r["counterparty"] or r["vpa"]) or (r["counterparty"] and parse.is_junk_party(r["counterparty"]))
             or (r["last4"] and r["counterparty"] == f"A/c ••{r['last4']}")]   # your own account isn't the payee
     # Alerts the parser now recognises as not-a-payment (e.g. "to be debited by" notices), and ones from
     # senders it no longer treats as a bank (fund houses, insurers), are removed.
-    for r in conn.execute("SELECT id, raw, sender FROM transactions").fetchall():
-        if (parse.SKIP_RE.search(parse.normalize(r["raw"] or ""))
-                or not parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"])):
+    for r in conn.execute("SELECT id, raw, sender, bank FROM transactions WHERE source != 'file'").fetchall():
+        raw = r["raw"] or ""
+        us_by_claude = cur(r) == "USD" and raw.startswith("[read by Claude]")   # Claude already judged it a payment
+        if ((not us_by_claude and parse.is_not_payment(parse.normalize(raw), cur(r)))
+                or not parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"], raw)):
             conn.execute("UPDATE transactions SET duplicate_of=NULL WHERE duplicate_of=?", (r["id"],))
             conn.execute("DELETE FROM transactions WHERE id=?", (r["id"],))
             fixed += 1
     for r in rows:
         if not conn.execute("SELECT 1 FROM transactions WHERE id=?", (r["id"],)).fetchone():
             continue
-        res = parse.parse_alert(r["raw"] or "")
+        res = parse.parse_alert(r["raw"] or "", "", cur(r))
         match = [t for t in res.txns if t.direction == r["direction"] and abs(t.amount - r["amount"]) < 0.01]
         new = (match[0].counterparty, match[0].vpa) if match else (None, None)
         if new != (r["counterparty"], r["vpa"]):
             conn.execute("UPDATE transactions SET counterparty=?, vpa=? WHERE id=?", (*new, r["id"]))
             fixed += 1
     # Card/account endings, with the current parser (an older one sometimes read the amount as the ending).
-    for r in conn.execute("SELECT id, raw, bank, amount, direction, last4, account FROM transactions").fetchall():
-        match = [t for t in parse.parse_alert(r["raw"] or "").txns
+    for r in conn.execute("SELECT id, raw, bank, amount, direction, last4, account FROM transactions "
+                          "WHERE source != 'file'").fetchall():
+        match = [t for t in parse.parse_alert(r["raw"] or "", "", cur(r)).txns
                  if t.direction == r["direction"] and abs(t.amount - r["amount"]) < 0.01]
         if match:
             acct = _account_label(r["bank"], match[0].kind, match[0].last4)
@@ -266,14 +279,36 @@ def reparse_parties(conn: sqlite3.Connection, settings: dict) -> int:
         if conn.execute("SELECT 1 FROM transactions WHERE duplicate_of=?", (r["id"],)).fetchone():
             continue   # already the kept copy of something
         _mark_duplicate(conn, r["id"], r["source"], r["ts"], r["amount"], r["direction"], r["last4"])
-    for r in conn.execute("SELECT id, counterparty FROM transactions WHERE COALESCE(counterparty,'')!=''").fetchall():
+    for r in conn.execute("SELECT id, counterparty FROM transactions WHERE COALESCE(counterparty,'')!='' "
+                          "AND source != 'file'").fetchall():
         cleaned = parse._clean_party(r["counterparty"])
         if cleaned != r["counterparty"]:
             conn.execute("UPDATE transactions SET counterparty=? WHERE id=?", (cleaned, r["id"]))
             fixed += 1
+    fixed += retry_review(conn, settings)
     recategorize(conn, settings)
     db.set_state(conn, "parser_version", str(parse.PARSER_VERSION))
     return fixed
+
+
+def retry_review(conn: sqlite3.Connection, settings: dict) -> int:
+    """Messages from banks read in dollars that are still on the review list (the reader couldn't read them, or
+    didn't know the bank yet) are read again with the current reader. Returns how many it reads now. Rupee
+    alerts are left alone: that reader's patterns didn't change."""
+    home, n = money.home(settings), 0
+    for r in conn.execute("SELECT * FROM review").fetchall():
+        bank = parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"], r["snippet"] or "")
+        if not bank or parse.currency_for(bank, home) != "USD" or ":" not in r["uid"]:
+            continue
+        msg = {"id": r["uid"].split(":", 1)[1], "sender": r["sender"] or "", "subject": "", "text": r["snippet"] or "",
+               "ts_epoch": datetime.fromisoformat(r["ts"]).timestamp()}
+        conn.execute("DELETE FROM review WHERE uid=?", (r["uid"],))
+        kind = ingest(conn, msg, r["source"], settings)
+        if kind in ("txn", "info"):
+            n += 1
+        elif kind == "skip":           # not even worth a look now: keep it where it was
+            conn.execute("INSERT OR REPLACE INTO review VALUES(?,?,?,?,?,?)", tuple(r))
+    return n
 
 
 def refresh_dashboard(conn: sqlite3.Connection) -> None:
@@ -311,7 +346,8 @@ def run(quiet_notify: bool = False) -> int:
                 seen = {r["uid"] for r in conn.execute("SELECT uid FROM seen")}
             gstats: dict = {}
             for m in gmail.fetch_since(last - 86400, seen,   # 1 day overlap; 'seen' prevents repeats
-                                       progress=lambda d, t: progress("Reading emails", d, t), stats=gstats):
+                                       progress=lambda d, t: progress("Reading emails", d, t), stats=gstats,
+                                       query=gmail.search_query(settings)):
                 kind = ingest(conn, m, "email", settings)
                 counts["email"] += 1
                 counts[kind] = counts.get(kind, 0) + 1
@@ -335,6 +371,12 @@ def run(quiet_notify: bool = False) -> int:
         pass
     elif ok:
         cursor = db.get_state(conn, "sms_after_rowid")
+        if not db.get_state(conn, "sms_short_codes"):
+            # Once: texts from 5-6 digit short codes (how US banks text) used to be passed over. Outside India,
+            # look through the backfill window again for them ('seen' skips everything already read).
+            if money.home(settings) != "INR":
+                cursor = None
+            db.set_state(conn, "sms_short_codes", "1")
         after = int(cursor) if cursor is not None else sms.max_rowid_before(backfill_epoch)
         newest = after
         try:

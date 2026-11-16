@@ -2,7 +2,8 @@
 
 Jobs, each sent in batches to `claude -p` (no tools, no connectors, no hooks, no saved session):
   senders    unknown senders: hide shops/apps/ads; a sender that looks like a bank is only flagged
-  unread     bank alerts the parser couldn't read: count real payments, drop non-payments
+  unread     bank alerts the parser couldn't read: count real payments, record balances and card dues,
+             drop non-payments
   doubles    the same payment reported twice in different words: count it once
   payees     payments with no payee: take the merchant/person from the message (must appear in it word for word)
   splits     money from friends that is their share of a bill you paid: reduces that bill's category
@@ -53,9 +54,14 @@ UNREAD_SYSTEM = BASE + (
     "'USD'; rupees are 'INR'), direction 'out' (money left) or 'in' (money came in), the payee or merchant name "
     "as written ('' if none), the last 4 digits of the card or account if shown ('' if not), and card=true when "
     "it is a credit/debit card.\n"
-    "verdict 'not_payment': nothing was charged or credited in this message: OTPs, offers, statements, "
-    "reminders, 'will be debited' notices, mandate or AutoPay set-ups that only register (no charge), failed or "
-    "declined attempts, balance updates.\n"
+    "verdict 'balance': nothing moved, but the message states a bank account's balance (available or current "
+    "balance; never a card's available credit or limit) or what is owed on a credit card (statement balance, total "
+    "amount due, current card balance). Give amount and currency as written, the last 4 digits of that account or "
+    "card (if none is shown, answer 'unsure'), card=true when it is what is owed on a credit card, and due_date as "
+    "YYYY-MM-DD for a card statement's payment due date ('' if none).\n"
+    "verdict 'not_payment': nothing was charged or credited and no balance is stated: OTPs, offers, reminders, "
+    "'will be debited' notices, mandate or AutoPay set-ups that only register (no charge), failed or declined "
+    "attempts.\n"
     "verdict 'unsure': can't tell, or the amount is masked or missing.")
 
 DOUBLES_SYSTEM = BASE + (
@@ -88,10 +94,10 @@ def _schema(props: dict, required: list[str]) -> dict:
 SENDERS_SCHEMA = _schema({"verdict": {"type": "string", "enum": ["bank", "not_bank", "unsure"]}}, ["verdict"])
 DOUBLES_SCHEMA = _schema({"verdict": {"type": "string", "enum": ["same", "different", "unsure"]}}, ["verdict"])
 UNREAD_SCHEMA = _schema({
-    "verdict": {"type": "string", "enum": ["payment", "not_payment", "unsure"]},
+    "verdict": {"type": "string", "enum": ["payment", "balance", "not_payment", "unsure"]},
     "amount": {"type": "number"}, "currency": {"type": "string"},
     "direction": {"type": "string", "enum": ["in", "out", ""]}, "payee": {"type": "string"},
-    "last4": {"type": "string"}, "card": {"type": "boolean"}}, ["verdict"])
+    "last4": {"type": "string"}, "card": {"type": "boolean"}, "due_date": {"type": "string"}}, ["verdict"])
 CATEGORIES_SCHEMA = _schema({"category": {"type": "string"},
                              "confidence": {"type": "string", "enum": ["high", "medium", "low"]}},
                             ["category", "confidence"])
@@ -216,7 +222,10 @@ def job_unread(conn, settings) -> tuple[int, str]:
         home = money.home(settings)
         cur = (d.get("currency") or home).upper().replace("RS", "INR").replace("₹", "INR")
         amt, direction = float(d.get("amount") or 0), d.get("direction")
-        bank = parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"])
+        bank = parse.bank_for_sender(r["sender"] or "", settings["trusted_senders"], r["snippet"] or "")
+        if v == "balance":
+            applied += _unread_balance(conn, settings, r, d, keep, cur, amt, bank)
+            continue
         rate, rate_src = fx.rate(conn, cur, home, r["ts"][:10], settings) if v == "payment" else (None, "")
         if v != "payment" or amt <= 0 or direction not in ("in", "out") or not bank or rate is None:
             why = reason if v != "payment" or rate is not None else rate_src
@@ -245,6 +254,32 @@ def job_unread(conn, settings) -> tuple[int, str]:
         _record(conn, "unread", r["uid"], "payment", label, reason, {"review": keep, "txn": tid}, applied=True)
         applied += 1
     return applied, err
+
+
+def _unread_balance(conn, settings, r, d, keep, cur, amt, bank) -> int:
+    """A balance Claude read: a bank account's goes to balances, what's owed on a card to card_dues (both count in
+    net worth). Returns 1 if recorded, 0 if left to the person (no ending, no bank, no rate)."""
+    home, reason = money.home(settings), d.get("reason")
+    last4 = re.sub(r"\D", "", d.get("last4") or "")[-4:] or None
+    rate = fx.rate(conn, cur, home, r["ts"][:10], settings)[0] if amt > 0 else None
+    label = f"{r['sender'][:40]} · {r['ts'][:10]}"
+    if not last4 or not bank or rate is None:
+        _record(conn, "unread", r["uid"], "unsure", label, reason or "no account ending or rate", {"review": keep})
+        return 0
+    value = round(amt * rate, 2)
+    if d.get("card"):
+        account, table = sync._account_label(bank, "card", last4), "card_dues"
+        due = d.get("due_date") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d.get("due_date") or "") else None
+        conn.execute("INSERT OR REPLACE INTO card_dues VALUES(?,?,?,?)", (account, r["ts"], value, due))
+        what = f"{account}: {_money(value)} owed"
+    else:
+        account, table = sync._account_label(bank, "account", last4), "balances"
+        conn.execute("INSERT OR REPLACE INTO balances VALUES(?,?,?,?)", (account, r["ts"], value, r["source"]))
+        what = f"{account}: balance {_money(value)}"
+    conn.execute("DELETE FROM review WHERE uid=?", (r["uid"],))
+    _record(conn, "unread", r["uid"], "balance", f"{what} · {r['ts'][:10]}", reason,
+            {"review": keep, "balance": {"table": table, "account": account, "ts": r["ts"]}}, applied=True)
+    return 1
 
 
 def fx_note(cur: str, amt: float, conv: float, rate: float, src: str, home: str = "INR") -> str:
@@ -511,6 +546,12 @@ AUDIT_SYSTEM = BASE + (
     "'was successful'). fix_payee as written in the text.\n"
     "confidence 'high' only when the text makes it certain.")
 
+# Added to the audit's instructions only when a batch has payments read from a downloaded statement.
+AUDIT_FILE_NOTE = (
+    "\nItems with source 'file' come from a statement the person downloaded from their bank or card: the text is "
+    "the bank's one-line description of a posted payment, with no amount or direction in it. For those, report "
+    "only wrong_payee, wrong_category and duplicate.")
+
 MERGED_SYSTEM = BASE + (
     "Each item is a pair the tracker merged as ONE money movement (it counts only 'kept'). Check with the texts.\n"
     "verdict 'same': both report the same single money movement (e.g. email and text, refund processed / refunded "
@@ -583,7 +624,10 @@ def job_audit(conn, settings, progress=None) -> tuple[int, str]:
         return {"id": str(r["id"]), **_row(r), "category": r["category"], "set_by": _set_by(conn, r, settings)}
 
     batches = [[item(r) for r in b] for b in _batches(rows, LIMITS["batch"])]
-    results = _parallel(batches, lambda b: _ask({**ctx, "items": b}, AUDIT_SYSTEM, AUDIT_SCHEMA, settings),
+    def system(b):
+        return AUDIT_SYSTEM + (AUDIT_FILE_NOTE if any(i["source"] == "file" for i in b) else "")
+
+    results = _parallel(batches, lambda b: _ask({**ctx, "items": b}, system(b), AUDIT_SCHEMA, settings),
                         progress, "Claude is checking every transaction")
     applied, errs = 0, []
     allowed = {"out": set(tidy.SPEND + tidy.BOTH), "in": set(tidy.INCOME + tidy.BOTH + _paid_back())}
@@ -754,6 +798,9 @@ def undo(conn, settings: dict, decision_id: int) -> bool:
     elif d["job"] == "categories" and "txn" in det:
         conn.execute("UPDATE transactions SET category_locked=0 WHERE id=? AND category_locked=2", (det["txn"],))
     elif d["job"] == "unread":
+        b = det.get("balance") or {}
+        if b.get("table") in ("balances", "card_dues"):
+            conn.execute(f"DELETE FROM {b['table']} WHERE account=? AND ts=?", (b["account"], b["ts"]))
         if det.get("txn"):
             conn.execute("UPDATE transactions SET duplicate_of=NULL WHERE duplicate_of=?", (det["txn"],))
             conn.execute("DELETE FROM transactions WHERE id=?", (det["txn"],))

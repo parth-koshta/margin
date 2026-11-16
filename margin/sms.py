@@ -1,6 +1,7 @@
 """Bank SMS from this Mac's Messages app (needs iPhone text forwarding + Full Disk Access)."""
 from __future__ import annotations
 
+import re
 import shutil
 import sqlite3
 from datetime import datetime, timezone
@@ -52,8 +53,22 @@ def available() -> tuple[bool, str]:
         return False, "No permission to read Messages (Full Disk Access needed)."
 
 
+SHORT_CODE = re.compile(r"\d{5,6}")
+
+
+def is_service_sender(sender: str) -> bool:
+    """Banks text from alphanumeric sender IDs (India: JD-HDFCBK-S) or 5-6 digit short codes (US: 24273).
+    Never a person: phone numbers (7+ digits, +1...) and email addresses are not read at all."""
+    s = (sender or "").strip()
+    if not s or "@" in s:
+        return False
+    if any(c.isalpha() for c in s):
+        return True
+    return bool(SHORT_CODE.fullmatch(s))
+
+
 def fetch_since(after_rowid: int):
-    """Yield dicts {id, rowid, sender, ts_epoch, text} for incoming texts from non-phone-number senders."""
+    """Yield dicts {id, rowid, sender, ts_epoch, text} for incoming texts from service senders (never people)."""
     ok, why = available()
     if not ok:
         raise NoAccess(why)
@@ -74,8 +89,7 @@ def fetch_since(after_rowid: int):
         shutil.rmtree(tmp, ignore_errors=True)
     for rowid, guid, date, text, body, sender in rows:
         sender = sender or ""
-        # Bank alerts come from alphanumeric sender IDs (e.g. JD-HDFCBK-S), not phone numbers or emails.
-        if not any(c.isalpha() for c in sender) or "@" in sender:
+        if not is_service_sender(sender):
             continue
         text = text or _decode_attributed(body)
         if not text:

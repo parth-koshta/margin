@@ -41,7 +41,7 @@ def ensure_data_dir() -> None:
             pass
     if not ASSETS_PATH.exists():
         ASSETS_PATH.write_text(
-            "# Things the tracker can't see in email/SMS. kind = asset or liability. value in INR.\n"
+            "# Things the tracker can't see in email/SMS. kind = asset or liability. value in your home currency.\n"
             "# Edit freely; the nightly sync reads this file every time.\n"
             "name,kind,value,as_of\n"
             "# Gold coins,asset,0,2026-11-01\n"

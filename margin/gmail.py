@@ -37,6 +37,27 @@ K_CLIENT_ID, K_CLIENT_SECRET, K_REFRESH = "gmail_client_id", "gmail_client_secre
 SEARCH = ("(debited OR credited OR spent OR \"has been used\" OR withdrawn OR \"a/c\" OR \"amount due\" "
           "OR \"total due\" OR \"minimum due\" OR salary OR refund OR payout) "
           "-category:promotions -category:social -in:sent -in:chats")
+# US banks word their alerts differently ("You made a $45.00 transaction with ...", "A deposit of ...", "Your
+# available balance is ..."). Phrases only banks use are searched from anyone; the common words (transaction,
+# payment, purchase...) only from US banks' own domains and the senders you trusted, so shop receipts and
+# newsletters don't flood the sync. Used when your home currency isn't the rupee; in India the search is SEARCH.
+US_PHRASES = ('"available balance" OR "current balance" OR "statement balance" OR "minimum payment" OR '
+              '"direct deposit" OR "card ending" OR "account ending"')
+US_WORDS = "transaction OR transactions OR purchase OR charge OR charged OR payment OR deposit OR withdrawal OR balance"
+
+
+def search_query(settings: dict | None = None) -> str:
+    """The Gmail search for bank alerts: SEARCH in India; outside it, SEARCH plus US banks' wording."""
+    from . import money, parse   # noqa: PLC0415
+    settings = settings or {}
+    if money.home(settings) == "INR":
+        return SEARCH
+    domains = [d for d, _ in parse.US_DOMAINS]
+    domains += [t for t in settings.get("trusted_senders") or [] if "." in t and " " not in t and "@" not in t]
+    senders = " ".join(f"from:{d}" for d in dict.fromkeys(domains))
+    words = SEARCH.split(") ", 1)[0] + ")"
+    rest = SEARCH.split(") ", 1)[1]
+    return f"({words} OR ({US_PHRASES}) OR (({US_WORDS}) {{{senders}}})) {rest}"
 
 
 class AuthError(RuntimeError):
@@ -309,7 +330,8 @@ def _fetch_one(mid: str, token: _Token):
     }
 
 
-def fetch_since(after_epoch: int, seen: set[str], progress=None, workers: int = 4, stats: dict | None = None):
+def fetch_since(after_epoch: int, seen: set[str], progress=None, workers: int = 4, stats: dict | None = None,
+                query: str = SEARCH):
     """Yield dicts {id, sender, subject, ts_epoch, text} for new matching messages.
 
     Lists matching ids first (cheap) so the total is known, then fetches bodies a few at a time.
@@ -317,7 +339,7 @@ def fetch_since(after_epoch: int, seen: set[str], progress=None, workers: int = 
     and counted in stats["skipped"]; the caller must then not advance its cursor, so they're retried.
     """
     token = _Token()
-    q = f"{SEARCH} after:{int(after_epoch)}"
+    q = f"{query} after:{int(after_epoch)}"
     ids, page = [], None
     while True:
         params = {"q": q, "maxResults": 500}
