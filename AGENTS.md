@@ -57,7 +57,7 @@ Ask, then write `~/Library/Application Support/Margin/settings.json` (create the
 
 | Key | Ask them | Example |
 |---|---|---|
-| `currency` | Home currency (ISO code). Everything is totalled in it. | `"INR"` (default), `"USD"` |
+| `currency` | Home currency (ISO code). Everything is totalled in it. `"USD"` turns on the US wording in the Gmail search and reads banks in both countries (Citi, Amex) in dollars | `"INR"` (default), `"USD"` |
 | `self_names` | Their name as banks print it, for transfers to themselves | `["KAVYA MENON", "MENON KAVYA"]` |
 | `read_sms` | Do their bank texts reach this Mac (iPhone + Text Message Forwarding)? | `true` / `false` |
 | `misc_below` | Small unsorted spends below this go to Miscellaneous. 100 suits rupees; use ~3 for dollars/euros | `100` |
@@ -65,14 +65,19 @@ Ask, then write `~/Library/Application Support/Margin/settings.json` (create the
 | `ai_sort`, `ai_review` | Use Claude Code for sorting and reviews? | `true` |
 | `extra_categories` | Their own categories | `{"out": ["Pets"], "in": ["Freelance"]}` |
 | `project_categories` | Big one-off projects, shown apart on Spent | `["Home renovation"]` |
-| `other_investments` | Retirement accounts, savings, CDs, anything without a statement Margin reads | `[{"name": "401(k)", "kind": "retirement", "value": 52000, "cost": 40000}]` (`kind`: `retirement`, `cash` or `other`; optional `currency`, `as_of`) |
+| `other_investments` | Savings, CDs, retirement accounts with no positions download, anything without a statement Margin reads | `[{"name": "401(k)", "kind": "retirement", "value": 52000, "cost": 40000}]` (`kind`: `retirement`, `cash` or `other`; optional `currency`, `as_of`) |
 | `us_snapshot` | US shares held (INDmoney users): shares and dollars invested per ticker, on a date | `{"as_of": "2026-01-02", "holdings": {"VOO": {"shares": 3, "cost_usd": 1500}}}` |
 | `ppf` | PPF balance if they have no SBI statement | `[{"name": "PPF", "balance": 100000, "as_of": "2026-03-31"}]` |
 | `lock_minutes` | Minutes away before Touch ID is needed (0 = off) | `2` |
-| `trusted_senders` | Extra bank senders (email domains or SMS IDs) | `["mybank.in", "VM-MYBANK"]` |
+| `trusted_senders` | Extra bank senders (email domains, SMS IDs or US short codes), e.g. a credit union | `["mybank.in", "VM-MYBANK", "democu.org", "55512"]` |
 
 Others (rarely needed): `backfill_days` (365), `ai_model` ("sonnet"), `claude_path`, `fx_rates` (fallback rates,
-home currency per unit), `old_hostnames`.
+home currency per unit), `old_hostnames`, `indmoney` (`true` to read INDmoney order emails when the home currency
+isn't INR; with rupees at home they're always read).
+
+**Living in the US**: `"currency": "USD"`, `"misc_below": 3`, their name as US banks print it in `self_names`.
+Then ask them to turn on alerts in each bank's and card's app: email (and text, if they forward texts) for every
+transaction, deposits, the daily available balance, and the statement. That's what Margin reads each night.
 
 ### 3. Gmail, read-only (they do it; about 10 minutes)
 
@@ -104,17 +109,40 @@ remove margin at <https://myaccount.google.com/permissions>, then redo step 7.
 
 No iPhone or texts don't reach the Mac: `"read_sms": false`.
 
+Margin reads texts from service senders only: Indian bank IDs (`JD-HDFCBK-S`) and US short codes (5 or 6 digits).
+Texts from phone numbers (people) are never read. Chase (24273), Bank of America (73981) and Wells Fargo (93557)
+are known; any other short code counts when its text starts with a US bank's name ("Capital One: ..."), or once
+they trust it (`margin trust 55512`).
+
 ### 5. Statements (they type the passwords)
 
-Only what applies to them:
+Only what applies to them. Files go in `~/Library/Application Support/Margin/statements/` (the "statements
+folder"); every file there is read each night on the Mac, and a changed file is read again.
+
+In India:
 - Indian stocks and funds: `margin setup-pan` (CDSL statements are locked with the PAN).
 - NPS: `margin setup-pran`.
 - SBI PPF statement: `margin setup-ppf` (the statement's password).
-- EPF: they download the year's passbook PDF from the EPFO member portal into
-  `~/Library/Application Support/Margin/statements/`.
-- Other brokers: a holdings CSV export in the same `statements/` folder is read each night.
+- EPF: they download the year's passbook PDF from the EPFO member portal into the statements folder.
+- Other brokers: a holdings CSV export (a name and a current-value column) in the statements folder.
 
 Each `setup-*` asks in a hidden prompt, saves to the Keychain and checks it opens their latest statement.
+
+In the US (no passwords; they download, you check):
+- **Bank and card activity**: on each bank's or card's website, *Download account activity* (or *Export*), as CSV
+  or QFX/Quicken. A year back is a good first download, then a fresh one whenever they like (overlaps count once).
+  If the file name doesn't say the bank and the account's last 4 digits, rename it, e.g. `chase-checking-1234.csv`
+  or `amex-card-1001.csv`. Payments are counted once with the alerts (same amount and account within a few days);
+  balances and card balances count in net worth.
+- **Brokerage and retirement positions**: Fidelity (Positions → Download), Schwab (Positions → Export), Vanguard
+  (Download center, CSV), E*TRADE (Portfolios → Download) or any broker's QFX. Robinhood has no positions export:
+  its account activity report (Reports and statements → Reports, from the account's start) is rebuilt into
+  holdings. Accounts named IRA, Roth, 401(k), 403(b), 457, SEP, SIMPLE or TSP count as Retirement; if the file
+  doesn't say (Vanguard), put it in the file name (`vanguard-roth-ira.csv`). The newest file per account wins.
+- A 401(k) plan with no download: its value in `other_investments` (kind `retirement`), updated now and then.
+
+Check after the next `margin sync`: `margin doctor`, then the page's Net worth and Investments. Notes about files
+that couldn't be read show in the sync's problems ("Statements: ...").
 
 ### 6. Schedule, app, first sync
 
@@ -140,16 +168,32 @@ next morning, "Updated … 12:0x am" at the top of the page.
 
 ## Adding a bank or a country
 
-- **A sender Margin doesn't count**: `margin trust "<domain or SMS ID>"`, or *My bank* in Sort out.
+- **A sender Margin doesn't count**: `margin trust "<domain, SMS ID or short code>"`, or *My bank* in Sort out.
+  A credit union or small US bank is usually just this: once trusted, its alerts are read like any US bank's.
 - **A format the reader can't parse**: with `ai_sort` on, Claude reads it at the next sync (amount, currency,
   payee) and converts other currencies to the home currency. That's often enough.
-- **Teach the built-in reader** (`margin/parse.py`): add the sender to the bank list at the top, then a pattern
-  for the new wording, and a test in `tests/test_parse.py` with a **made-up** message in the same shape (fake
-  ending, fake amounts, fake names). The person can show you the shape of one of their messages; rewrite every
-  value before it goes anywhere. Run the tests and the leak guard.
+- **Teach the built-in reader** (`margin/parse.py`): add the sender to the bank list at the top (Indian banks:
+  `BANK_TOKENS`; US banks: `US_DOMAINS` by email domain, `US_SHORT_CODES` and `_US_NAMES` for texts), then a
+  pattern for the new wording, and a test with a **made-up** message in the same shape (fake ending, fake amounts,
+  fake names): `tests/test_parse.py` for Indian alerts, `tests/test_us.py` for US ones. The person can show you
+  the shape of one of their messages; rewrite every value before it goes anywhere. Run the tests and the leak
+  guard.
+- **Two readers, one per currency**: each bank's alerts are read in its currency (`parse.currency_for`): Indian
+  banks with the rupee patterns (`AMOUNT_RE`, `BAL_RE`, `SKIP_RE`...), US banks with the dollar ones (`US_*`,
+  `_parse_us`). Banks in both countries (Citi, Amex, HSBC) and trusted senders follow the home currency. Change
+  one reader and the other can't move: `tests/test_parse.py` must pass unchanged. After a change that should
+  re-read stored alerts, bump `PARSER_VERSION` (the next sync re-reads payees and endings and retries US
+  messages still on the review list); check first on the person's data that rupee results don't change,
+  comparing counts and totals only.
+- **A bank or broker download Margin can't read** (`margin/imports.py`): the column names it knows are listed near
+  the top (`DATE_COLS`, `AMOUNT_COLS`, `SYMBOL_COLS`...); add the bank's, with a made-up file in
+  `tests/test_us.py`. Ask the person for the header line only, never the rows.
 - **Categories for local merchants** belong in the person's own `rules.json` (via Sort out or `margin rule`), not
   in `margin/categorize.py`, which holds only well-known national brands.
 - **Currencies**: `margin/money.py` lists symbols, decimals and locales; add one there if it's missing.
+- **Another country**: set its currency, trust its banks; Claude reads their alerts in any currency. A built-in
+  reader for that country's wording follows the US one: its own patterns and `_parse_<country>`, picked by
+  `currency_for`, so the Indian and US readers stay exactly as they are.
 
 ## Working on the code
 
@@ -170,6 +214,7 @@ service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the 
 | `money.py`, `fx.py` | Home currency, formatting and detection; exchange rates (ECB) |
 | `ai.py`, `review.py`, `invreview.py` | Claude sorting; spending reviews and checks; investment analysis |
 | `invest.py`, `cas.py`, `nps.py`, `usstocks.py`, `epf.py`, `fd.py`, `ppf.py`, `prices.py` | Investments |
+| `imports.py` | Bank, card and broker files downloaded into the statements folder (CSV, QFX/OFX) |
 | `networth.py`, `tidy.py` | Net worth; Sort out logic |
 | `server.py`, `dashboard.py`, `icon.py`, `lock.py`, `touchid.swift` | The local page, its server and the Touch ID lock |
 | `pdf.py`, `pdftext.swift`, `keychain.py` | Locked PDFs via PDFKit; Keychain secrets |

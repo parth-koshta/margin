@@ -14,9 +14,11 @@ Everything is stored and shown on your Mac only, at <http://margin.localhost/>, 
 - **Any home currency**: amounts in other currencies are converted at the day's rate and keep their original
   (“£8.45 → $10.73”). Each currency is written its own way: ₹1,23,456 · $123,456 · ¥12,346.
 
-Built for **macOS**. It reads **Indian banks'** alerts out of the box (HDFC, ICICI, SBI, Axis, Kotak and more),
-plus CDSL, NPS, EPFO, PPF and fixed-deposit statements. With Claude sorting turned on, alerts in other formats
-and other currencies are read too; see [Other countries](#other-countries-and-currencies).
+Built for **macOS**. It reads **Indian banks'** alerts out of the box (HDFC, ICICI, SBI, Axis, Kotak and more)
+and **US banks'** (Chase, Bank of America, Wells Fargo, Capital One, Discover, Citi, Amex and more), plus CDSL, NPS,
+EPFO, PPF and fixed-deposit statements, and the bank, card and broker files you download. With Claude sorting
+turned on, alerts in other formats and other currencies are read too; see
+[Other countries](#other-countries-and-currencies).
 
 ## Try it first: the demo
 
@@ -60,8 +62,11 @@ command line tools (`xcode-select --install`, which also provides Python 3.9+ an
   locks at once; `"lock_minutes"` in `settings.json` changes the time (0 turns it off).
 - **Statement passwords** (PAN, PRAN, PPF statement password) are typed into hidden Terminal prompts and kept
   in the Keychain. PDFs are opened by macOS's own PDF reader and never saved unlocked.
-- **Prices**: Indian stocks and funds come from whole-market files (NSE/BSE closes, AMFI NAVs), so nothing
-  about your holdings is sent. US prices come from Yahoo Finance, which is sent only the tickers you hold.
+- **Prices**: Indian stocks and funds come from whole-market files (NSE/BSE closes, AMFI NAVs), fetched only
+  while you hold some, so nothing about your holdings is sent. US prices come from Yahoo Finance, which is sent
+  only the tickers you hold.
+- **Downloaded statements** (bank, card and broker files you put in the statements folder) are read on your
+  Mac. No Plaid, no aggregator, no bank login: Margin never connects to your bank.
   Exchange rates are the ECB's (frankfurter.dev): only currency codes and dates are sent.
 - **Claude** (optional) runs as Claude Code on your Mac (`claude -p`) with no tools, no connectors, no hooks
   and no saved session. The text Margin hands it is processed by Anthropic under your Claude plan: payees,
@@ -90,20 +95,23 @@ command line tools (`xcode-select --install`, which also provides Python 3.9+ an
   accounts) and **Investments** aren't income or spending. Add your name as banks print it to `self_names` so
   transfers to yourself are recognised. **Pay cycle** months run from one salary to the next.
   **Miscellaneous** holds small known spends (under `misc_below`); *Other spending* means not sorted yet.
-- **Net worth** = bank balances (from “available balance” in alerts) + investments + anything in `assets.csv`
-  − card dues (from statement emails).
+- **Net worth** = bank balances (from “available balance” in alerts and the balance in downloaded statements) +
+  investments + anything in `assets.csv` − card dues (from statement emails, card balance alerts and downloaded
+  card statements).
 
 ## Investments
 
 | Type | Where it comes from |
 |---|---|
 | Indian stocks, ETFs and mutual funds | CDSL's monthly Consolidated Account Statement (locked with your PAN), valued at each night's NSE/BSE close or AMFI NAV |
-| US stocks | A snapshot of your holdings (`us_snapshot`) plus INDmoney order emails after it, valued at each night's close |
+| US stocks, ETFs and funds | A positions export from your broker in the statements folder: Fidelity, Schwab, Vanguard or E*TRADE (CSV or QFX), or Robinhood's account activity report. Shares and cost basis per ticker, valued at each night's close |
+| US stocks through INDmoney | A snapshot of your holdings (`us_snapshot`) plus INDmoney order emails after it, valued at each night's close |
+| 401(k), IRA and other retirement accounts | The same positions export, when your broker or plan offers one: counted as Retirement, each fund valued at its close (a fund without a ticker keeps the file's value). Otherwise a value in `other_investments` |
 | NPS | KFintech CRA's monthly statement (locked with your PRAN) |
 | EPF | The EPFO passbook PDF in the statements folder, and EPFO's text after each contribution |
 | PPF | SBI's PPF statement (`margin setup-ppf`), plus deposits texted since; or a balance in `settings.json` |
 | Fixed deposits | HDFC's deposit advice emails, with interest accrued to today |
-| Retirement accounts, savings, CDs, anything else | `other_investments` in `settings.json` (for example a 401(k), an IRA, a savings account) |
+| Savings, CDs, retirement accounts without an export, anything else | `other_investments` in `settings.json` (for example a CD, a pension, a 401(k) plan with no download) |
 
 The page shows each holding's value, gain on cost and weight, value over time, your market's benchmark (the
 Nifty 50 and S&P 500 with rupees at home, the S&P 500 otherwise), stop-losses (an alert the first time a close
@@ -114,9 +122,34 @@ measures and describes but never recommends.
 
 Set your home currency once in `settings.json`, for example `"currency": "USD"`. Everything is totalled and shown in
 it. Money in any other currency is converted at the European Central Bank rate for that day and keeps a note of
-the original. The built-in alert reader knows Indian banks' formats; alerts it can't read (other countries'
+the original.
+
+**In the US**, with `"currency": "USD"`, Margin works out of the box:
+- **Bank and card alerts by email** from Chase, Bank of America, Wells Fargo, Capital One, Discover, Citi, Amex,
+  U.S. Bank, PNC, Ally, Schwab, Fidelity, SoFi, Synchrony, Navy Federal, USAA, Barclays and more are read in
+  dollars: purchases, deposits, withdrawals, Zelle, refunds, card payments, available balances, card balances and
+  card statements (what's owed and when it's due). Turn on the alerts you want in each bank's app; "every
+  transaction" alerts give the most complete picture.
+- **Bank texts** from US banks' short codes (Chase's 24273, Wells Fargo's 93557, and any short code whose text
+  starts with a US bank's name) are read like emails. Texts from people's phone numbers are never read.
+- **Downloaded statements**: drop the CSV or QFX/OFX files your banks and card issuers let you download into
+  `~/Library/Application Support/Margin/statements/`. Every payment in them is counted once, even when an alert
+  already reported it (same amount and card, within a few days) or two downloads overlap, and their balances
+  count in net worth. A restaurant tip added after the alert makes the amounts differ, so check those in Sort out. Name a file after the
+  bank and the account's last 4 digits if the bank doesn't (`ally-savings-1234.csv`).
+- **Investments**: drop your broker's positions export there too (see [Investments](#investments)). 401(k) and
+  IRA accounts are kept apart as Retirement.
+- **Shops**: national brands (Walmart, Target, Costco, Whole Foods, Trader Joe's, DoorDash, Lyft, Comcast,
+  Verizon, CVS, Chevron and the like) are sorted by default; card payments, transfers between your own accounts
+  and Venmo cash-outs count as Transfer.
+
+What you still type or click: `margin trust "<domain or short code>"` (or *My bank* in Sort out) for a credit union
+or a bank Margin doesn't know; categories for local shops and for Zelle or Venmo payments to people (each choice
+becomes a rule); retirement accounts with no download, CDs and the like in `other_investments`.
+
+**Elsewhere**, the built-in reader knows Indian and US banks' formats; alerts it can't read (other countries'
 banks, foreign-currency spends) go to Claude, who reads the amount, currency and payee, so turn on Claude sorting
-if your bank isn't Indian. Add your bank's sender with `margin trust`. Retirement accounts and savings go in
+if your bank is elsewhere. Add your bank's sender with `margin trust`. Retirement accounts and savings go in
 `other_investments`. To teach the built-in reader a new bank format, see
 [AGENTS.md](AGENTS.md#adding-a-bank-or-a-country).
 
