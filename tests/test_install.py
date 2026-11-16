@@ -35,6 +35,8 @@ def _out(fn, *args, **kw):
 NO_KEYCHAIN = mock.patch("margin.keychain.get_secret", return_value=None)
 NOT_LOADED = mock.patch.object(health, "_loaded", return_value=False)
 NOT_SYNCING = mock.patch.object(health, "sync_running", return_value=False)
+# The Mac running the tests may or may not let Python read Messages (GitHub's Macs do): never look at the real one.
+NO_MESSAGES = mock.patch("margin.sms.available", return_value=(False, "No Messages database on this Mac."))
 
 
 class Config(unittest.TestCase):
@@ -217,7 +219,7 @@ class Setup(unittest.TestCase):
             install.Step("mac", "you", "todo", "This Mac is missing the Xcode command line tools", "xcode-select")
         app = lambda: self.calls.append("app") or 0          # noqa: E731
         schedule = lambda: self.calls.append("schedule") or 0     # noqa: E731
-        with NO_KEYCHAIN, NOT_LOADED, NOT_SYNCING, \
+        with NO_KEYCHAIN, NOT_LOADED, NOT_SYNCING, NO_MESSAGES, \
                 mock.patch.object(install, "step_mac", return_value=mac), \
                 mock.patch.object(install, "_terminal", return_value=terminal), \
                 mock.patch.object(install, "BIN_DIR", self.tmp / "bin"), \
