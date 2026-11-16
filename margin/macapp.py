@@ -15,6 +15,7 @@ import plistlib
 import shutil
 import struct
 import subprocess
+import time
 import urllib.parse
 import zlib
 from pathlib import Path
@@ -145,6 +146,23 @@ def stale(app: Path) -> bool:
 
 def executable(app: Path) -> Path:
     return Path(app) / "Contents" / "MacOS" / EXECUTABLE
+
+
+def stop(app: Path) -> None:
+    """Before the app is removed: drop its Open at Login entry, and ask a running copy to quit (it locks Margin on
+    the way out). The AppleScript app (no Contents/MacOS/Margin) needs neither."""
+    exe = executable(app)
+    if not exe.exists():
+        return
+    try:
+        subprocess.run([str(exe), "--forget-login"], capture_output=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    subprocess.run(["pkill", "-TERM", "-f", str(exe)], capture_output=True)
+    for _ in range(40):                                   # up to 4 s while it locks and quits
+        if subprocess.run(["pgrep", "-f", str(exe)], capture_output=True).returncode != 0:
+            break
+        time.sleep(0.1)
 
 
 def forget(bundle_id: str = BUNDLE_ID) -> None:

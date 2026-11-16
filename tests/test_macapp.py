@@ -215,6 +215,44 @@ class SwiftSource(unittest.TestCase):
         self.assertIn("case 423: self.render(.locked(nil))", src)
         self.assertIn("case 404: self.render(.outdated)", src)     # an older page service: say so, not "reinstall"
 
+    def test_only_the_demo_copy_takes_a_port(self):
+        src = macapp.SOURCE.read_text()
+        self.assertIn('if isDemo, let i = args.firstIndex(of: "--port")', src)
+        self.assertEqual(src.count('firstIndex(of: "--port")'), 1)
+
+    def test_the_panel_stops_asking_once_closed_and_drops_figures_when_locked(self):
+        src = macapp.SOURCE.read_text()
+        self.assertIn("guard let self = self, self.isShown else { return }       // closed meanwhile", src)
+        self.assertIn("guard self.isShown else { return self.stopSyncWatch() }", src)
+        self.assertIn("lockTimer = every(3)", src)
+        self.assertIn('if code == 423 || json?["locked"] as? Bool == true { self.render(.locked(nil)) }', src)
+
+    def test_sigterm_quits_through_the_run_loop(self):
+        # terminate inside a main-queue block deadlocks: the lock call's answer waits on that same queue
+        src = macapp.SOURCE.read_text()
+        self.assertIn("NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)", src)
+        self.assertNotIn("setEventHandler { NSApp.terminate(nil) }", src)
+
+
+class Remove(unittest.TestCase):
+    def test_forgets_login_and_quits_a_running_copy_first(self):
+        tmp = Path(tempfile.mkdtemp(prefix="margin-rm-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        app = tmp / "Margin.app"
+        macapp.executable(app).parent.mkdir(parents=True)
+        macapp.executable(app).write_bytes(b"program")
+        calls = []
+        with mock.patch("margin.macapp.subprocess.run",
+                        side_effect=lambda cmd, **kw: calls.append(cmd) or mock.Mock(returncode=1)):
+            macapp.stop(app)
+        self.assertEqual(calls[0], [str(macapp.executable(app)), "--forget-login"])
+        self.assertEqual(calls[1], ["pkill", "-TERM", "-f", str(macapp.executable(app))])
+
+    def test_the_applescript_app_needs_nothing(self):
+        with mock.patch("margin.macapp.subprocess.run") as run:
+            macapp.stop(Path(tempfile.gettempdir()) / "no-such" / "Margin.app")
+        run.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

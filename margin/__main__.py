@@ -164,6 +164,7 @@ def cmd_app(a) -> int:
     AppleScript one that opens the page in the browser instead."""
     from . import macapp, server
     if a.action == "remove":
+        macapp.stop(APP_PATH)                            # quits it (locking Margin) and drops Open at Login
         subprocess.run(["rm", "-rf", APP_PATH])
         subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{paths.WEB_LABEL}"], capture_output=True)
         paths.WEB_PLIST.unlink(missing_ok=True)

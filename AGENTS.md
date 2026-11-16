@@ -131,7 +131,8 @@ with swiftc. Touch ID asks on first open. It's the private way to use Margin: br
 sites can read the page in a tab, and a tab leaves it in the browser's history and cache. To use a browser as well,
 `margin open` once in that browser hands it the key; then they bookmark <http://margin.localhost/>. Without the
 command line tools, `margin app install` makes a small app that opens the browser instead; run it again once
-they're installed. `margin app remove` removes the app and the page service.
+they're installed. `margin app remove` quits the app (which locks Margin), drops its Open at Login entry and
+removes it and the page service.
 
 The app also puts Margin's m in the menu bar: a click shows a quick glance (spent today, this month, net worth,
 Sort out, last sync) from `/api/glance`, and nothing while Margin is locked. Closing the window keeps it there.

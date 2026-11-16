@@ -21,9 +21,10 @@
 // - The window remembers its size and place; nothing else is saved.
 //
 // Built on this Mac by `margin app install` (margin/macapp.py) with swiftc from the Command Line Tools. Info.plist
-// says where the page is (MarginURL, always this Mac) and where its key is (MarginKeyFile). The demo's copy takes
-// --port <n>; the address itself can't be changed from outside, so the real app only ever shows the real page and
-// the demo's copy only the demo.
+// says where the page is (MarginURL, always this Mac) and where its key is (MarginKeyFile). Only the demo's copy
+// (MarginDemo) takes --port <n>; the real app ignores it, so nothing that starts it can point it, and its key, at
+// another port. The address itself can't be changed from outside, so the real app only ever shows the real page
+// and the demo's copy only the demo.
 import AppKit
 import ServiceManagement
 import WebKit
@@ -48,8 +49,9 @@ func isThisMac(_ url: URL) -> Bool {
 func loadConfig() -> Config? {
     guard let text = info["MarginURL"] as? String, var parts = URLComponents(string: text) else { return nil }
     let args = CommandLine.arguments
-    if let i = args.firstIndex(of: "--port"), i + 1 < args.count, let port = Int(args[i + 1]), (1...65535).contains(port) {
-        parts.port = port
+    if isDemo, let i = args.firstIndex(of: "--port"), i + 1 < args.count, let port = Int(args[i + 1]),
+       (1...65535).contains(port) {
+        parts.port = port                                // the demo's copy only: the demo can run on any port
     }
     parts.path = "/"
     parts.query = nil
@@ -542,7 +544,9 @@ final class Panel: NSViewController {
     weak var app: AppDelegate?
     let stack = NSStackView()
     var refreshTimer: Timer?
+    var lockTimer: Timer?
     var syncTimer: Timer?
+    var hasFigures = false
 
     init(app: AppDelegate) {
         self.app = app
@@ -574,13 +578,25 @@ final class Panel: NSViewController {
     func opened() {
         refresh()
         refreshTimer = every(30) { [weak self] in self?.refresh() }       // a slow refresh while it's open
+        lockTimer = every(3) { [weak self] in self?.checkLock() }         // and a quick look at the lock
+    }
+
+    /// While figures are showing, ask the server (cheaply) whether Margin has locked, on its own timer or from the
+    /// page's Lock button, so they go within seconds instead of at the next refresh.
+    func checkLock() {
+        guard hasFigures, isShown else { return }
+        client?.call("api/ping", timeout: 3) { [weak self] code, json in
+            guard let self = self, self.hasFigures, self.isShown else { return }
+            if code == 423 || json?["locked"] as? Bool == true { self.render(.locked(nil)) }
+        }
     }
 
     func closed() {
         refreshTimer?.invalidate()
-        syncTimer?.invalidate()
+        lockTimer?.invalidate()
         refreshTimer = nil
-        syncTimer = nil
+        lockTimer = nil
+        stopSyncWatch()
         render(.empty)                                   // no figures stay behind in the views
     }
 
@@ -643,7 +659,7 @@ final class Panel: NSViewController {
 
     @objc func syncNow(_ sender: Any?) {
         client?.call("api/sync", post: true) { [weak self] code, _ in
-            guard let self = self else { return }
+            guard let self = self, self.isShown else { return }       // closed meanwhile: nothing to watch
             if code == 423 { return self.render(.locked(nil)) }
             self.syncLine?.attributedStringValue = self.statusText("Syncing…", ok: true)
             self.watchSync()
@@ -655,8 +671,10 @@ final class Panel: NSViewController {
     func watchSync() {
         guard syncTimer == nil else { return }
         syncTimer = every(2) { [weak self] in
-            self?.client?.call("api/progress") { _, json in
-                guard let self = self else { return }
+            guard let self = self, self.isShown else { self?.stopSyncWatch(); return }
+            self.client?.call("api/progress") { code, json in
+                guard self.isShown else { return self.stopSyncWatch() }
+                if code == 423 { self.stopSyncWatch(); return self.render(.locked(nil)) }
                 let running = json?["running"] as? Bool ?? false
                 if running {
                     var text = "Syncing…"
@@ -666,12 +684,16 @@ final class Panel: NSViewController {
                     }
                     self.syncLine?.attributedStringValue = self.statusText(text, ok: true)
                 } else {
-                    self.syncTimer?.invalidate()
-                    self.syncTimer = nil
+                    self.stopSyncWatch()
                     self.refresh()
                 }
             }
         }
+    }
+
+    func stopSyncWatch() {
+        syncTimer?.invalidate()
+        syncTimer = nil
     }
 
     @objc func showMore(_ sender: NSButton) {
@@ -697,6 +719,7 @@ final class Panel: NSViewController {
         _ = view
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         syncLine = nil
+        if case .figures = state { hasFigures = true } else { hasFigures = false }
         switch state {
         case .empty:
             return
@@ -919,6 +942,21 @@ final class Panel: NSViewController {
         return b
     }
 }
+
+// `margin app remove` runs the app once with --forget-login before deleting it, so no Login Items entry is left.
+if CommandLine.arguments.contains("--forget-login") {
+    if #available(macOS 13.0, *) { try? SMAppService.mainApp.unregister() }
+    exit(0)
+}
+
+// Asked to stop (`margin app remove`, the demo's Ctrl-C): quit the normal way, which locks Margin first.
+signal(SIGTERM, SIG_IGN)
+let stopSignal = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+stopSignal.setEventHandler {
+    // From the run loop, not inside this block: quitting waits for the lock call, whose answer comes on this queue.
+    NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
+}
+stopSignal.resume()
 
 let app = NSApplication.shared
 let delegate = AppDelegate()
