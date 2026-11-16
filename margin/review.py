@@ -310,12 +310,15 @@ def run_due(conn: sqlite3.Connection, settings: dict) -> list[dict]:
     return done
 
 
+def _key_ids(key: str) -> list[int]:
+    """The transaction ids a flag's key (fkey) is made of."""
+    return [int(x) for x in key[2:].split(":") if x.isdigit()] if key.startswith("t:") else []
+
+
 def _settled(conn: sqlite3.Connection, key: str) -> bool:
     """A flag about payments Margin no longer counts separately (merged as a repeat, or not a payment) is settled:
     e.g. a 'double charge' whose second charge has since been counted as the same payment."""
-    if not key.startswith("t:"):
-        return False
-    ids = [int(x) for x in key[2:].split(":") if x.isdigit()]
+    ids = _key_ids(key)
     if not ids:
         return False
     counted = {r[0] for r in conn.execute(
@@ -323,31 +326,62 @@ def _settled(conn: sqlite3.Connection, key: str) -> bool:
     return len(counted) < len(ids)
 
 
+def _payments(conn: sqlite3.Connection):
+    """key -> the payments a flag is about. A copy Margin counts as a repeat (the text of an emailed alert, say)
+    stands for the copy it keeps, so a flag means the same payment whichever copy is counted now."""
+    kept = {r[0]: r[1] for r in conn.execute("SELECT id, duplicate_of FROM transactions WHERE duplicate_of IS NOT NULL")}
+
+    def payments(key: str) -> frozenset:
+        out = set()
+        for i in _key_ids(key):
+            for _ in range(5):                       # a repeat points at the kept copy: never a long chain
+                if i not in kept:
+                    break
+                i = kept[i]
+            out.add(i)
+        return frozenset(out)
+    return payments
+
+
+def _looked_at(conn: sqlite3.Connection):
+    """key -> whether you've said "Looks fine" to it. That's about the payments, not the wording or the grouping: it
+    also covers a later flag about the same payments under another key, as when a review is written again, the weekly
+    or monthly review flags them again, the AI flags one of them alone after flagging it with others, or Margin now
+    counts another copy of the payment. A flag that brings in a payment you haven't looked at stays open, and so does
+    a flag about several payments you only looked at one by one (a possible double charge of two fine payments)."""
+    keys = {r[0] for r in conn.execute("SELECT fkey FROM flag_state WHERE state='fine'")}
+    payments = _payments(conn)
+    marked = [p for p in map(payments, keys) if p]
+
+    def fine(key: str) -> bool:
+        if key in keys:
+            return True
+        p = payments(key)
+        return bool(p) and any(p <= m for m in marked)
+    return fine
+
+
 def open_flags(conn: sqlite3.Connection) -> list[dict]:
-    fine = {r["fkey"] for r in conn.execute("SELECT fkey FROM flag_state WHERE state='fine'")}
-    fine |= {k for k in _flag_keys(conn) if _settled(conn, k)}
+    looked_at = _looked_at(conn)
     out, seen = [], set()
     for r in conn.execute("SELECT kind, start, flags FROM reviews ORDER BY start DESC LIMIT 90"):
         for f in json.loads(r["flags"] or "[]"):
-            if f["key"] not in fine and f["key"] not in seen and f["severity"] in ("high", "medium"):
-                seen.add(f["key"])
+            if f["key"] in seen or f["severity"] not in ("high", "medium"):
+                continue
+            seen.add(f["key"])
+            if not looked_at(f["key"]) and not _settled(conn, f["key"]):
                 out.append(f)
     return out
 
 
-def _flag_keys(conn: sqlite3.Connection) -> set[str]:
-    return {f["key"] for r in conn.execute("SELECT flags FROM reviews ORDER BY start DESC LIMIT 90")
-            for f in json.loads(r["flags"] or "[]")}
-
-
 def listing(conn: sqlite3.Connection) -> list[dict]:
-    fine = {r["fkey"] for r in conn.execute("SELECT fkey FROM flag_state WHERE state='fine'")}
+    looked_at = _looked_at(conn)
     out = []
     for r in conn.execute("SELECT * FROM reviews ORDER BY start DESC, kind LIMIT 90"):
         flags = json.loads(r["flags"] or "[]")
         for f in flags:
             f["settled"] = _settled(conn, f["key"])
-            f["fine"] = f["key"] in fine or f["settled"]
+            f["fine"] = f["settled"] or looked_at(f["key"])
         out.append({"id": r["id"], "kind": r["kind"], "start": r["start"], "end": r["end"],
                     "label": label(r["kind"], date.fromisoformat(r["start"]), date.fromisoformat(r["end"])),
                     "created": r["created"], "headline": r["headline"], "summary": json.loads(r["summary"] or "[]"),
@@ -360,5 +394,10 @@ def set_flag(conn: sqlite3.Connection, key: str, state: str) -> None:
         conn.execute("INSERT OR REPLACE INTO flag_state VALUES(?,?,?)",
                      (key, "fine", datetime.now().isoformat(timespec="seconds")))
     else:
-        conn.execute("DELETE FROM flag_state WHERE fkey=?", (key,))
+        # Undo takes back every "Looks fine" that covers this flag's payments (see _looked_at), or it would stay fine.
+        payments = _payments(conn)
+        mine = payments(key)
+        for (k,) in conn.execute("SELECT fkey FROM flag_state").fetchall():
+            if k == key or (mine and mine <= payments(k)):
+                conn.execute("DELETE FROM flag_state WHERE fkey=?", (k,))
     conn.commit()
