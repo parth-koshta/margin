@@ -213,6 +213,7 @@ class SwiftSource(unittest.TestCase):
         self.assertIn('client.call("api/glance")', src)
         self.assertIn("render(.empty)", src)
         self.assertIn("case 423: self.render(.locked(nil))", src)
+        self.assertIn("case 404: self.render(.outdated)", src)     # an older page service: say so, not "reinstall"
 
 
 if __name__ == "__main__":

@@ -535,7 +535,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
 /// What the panel shows. Figures only ever come from a fresh /api/glance and are dropped when it closes.
 enum PanelState {
-    case empty, loading, figures([String: Any]), locked(String?), unlocking, problem(String)
+    case empty, loading, figures([String: Any]), locked(String?), unlocking, problem(String), outdated
 }
 
 final class Panel: NSViewController {
@@ -603,6 +603,7 @@ final class Panel: NSViewController {
                     self.render(.figures(json!))
                     if ((json!["sync"] as? [String: Any])?["running"] as? Bool) == true { self.watchSync() }
                 case 423: self.render(.locked(nil))
+                case 404: self.render(.outdated)        // a page service from before the glance
                 case 0: self.render(.problem("Margin's page isn't answering."))
                 default: self.render(.problem("Margin couldn't read its figures (\(code))."))
                 }
@@ -708,6 +709,12 @@ final class Panel: NSViewController {
             lockedView(why, busy: false)
         case .unlocking:
             lockedView("Waiting for Touch ID…", busy: true)
+        case .outdated:
+            add(header(nil))
+            add(text("The glance needs a newer Margin.", size: 13))
+            add(text("Margin's page service is older than this app. Update the Margin folder, then restart the "
+                     + "service: margin app install.", size: 11, color: .secondaryLabelColor))
+            add(buttons([], primary: button("Open Margin", #selector(openMargin(_:)))))
         case .problem(let message):
             add(header(nil))
             add(text(message, size: 13))
