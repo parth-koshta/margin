@@ -270,11 +270,15 @@ The Margin app opens the page in its own window and locks at once when it's hidd
 
 The `margin-update` skill follows this.
 
-1. `margin update --check` fetches and lists the incoming commits (how many, and their subjects). It changes
-   nothing.
+People get releases, not every commit: a release is a tag `vX.Y.Z` on GitHub's main (see Releasing). The nightly
+sync checks for a newer one (`release.py`; `check_updates`, on by default), and the page and `margin doctor --json`
+(`margin.update_available`) say when there is one. A copy whose project has no releases follows its newest commit.
+
+1. `margin update --check` fetches and lists the changes in the newest release (how many, and their subjects). It
+   changes nothing.
 2. Show the person the list and ask. No new code runs before they've seen it and said yes.
-3. `margin update --to <commit>` (the commit `--check` printed): fast-forwards to exactly that commit (never a
-   merge; later arrivals aren't included), then, running the new code, the tests on a temporary data folder,
+3. `margin update --to <version>` (the release `--check` printed, such as `v0.2.0`): fast-forwards to exactly that
+   (never a merge; later commits aren't included), then, running the new code, the tests on a temporary data folder,
    going back to the previous version by itself if they fail; then it rebuilds the Swift helpers and the app and
    reloads the launchd agents. It refuses while a sync runs and never reads or changes their data. In the
    person's own Terminal, plain `margin update` shows the list and asks them.
@@ -352,6 +356,7 @@ service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the 
 | `demo.py` | The made-up demo people and the stand-ins for the AI, sync and Touch ID |
 | `privacy.py`, `.githooks/` | The leak guard |
 | `install.py`, `health.py`, `config.py` | `margin setup` and `update`; `doctor` (and `--json`); `config get/set` |
+| `release.py` | Versions: the newest release (a tag `vX.Y.Z`), this copy's version, the nightly check for a newer one |
 | `.claude/hooks/data_guard.py`, `.claude/settings.json` | Claude Code's data guard (tests in `tests/test_data_guard.py`) |
 | `.claude/skills/` | Claude Code skills: `margin-setup`, `margin-update`, `margin-add-bank` |
 
@@ -364,6 +369,20 @@ Everything in tests, docs, comments and the demo is invented:
   Companies: ACME …, DEMO …. Phone numbers: 9999999999.
 - IDs: EPF `ZZDEM…1234`, folios `1234567890/0`, ISINs `INE000D01011`-style.
 - Amounts and dates: invented, round-ish, never someone's real figures.
+
+### Releasing (only when the maintainer asks)
+
+Pushing to main doesn't reach anyone: a release does. Only with the maintainer's go-ahead, since a release is public
+at once and `margin update` offers it to everyone:
+
+1. Main on GitHub is the commit to release, and its GitHub check passed.
+2. The version: `vMAJOR.MINOR.PATCH`, higher than the last (`git tag --list 'v*'`). A fix is the next patch; new
+   features the next minor.
+3. The notes: what changed for people, in plain words, from `git log --format=%s <last tag>..main`. Made-up
+   examples only; run them through the leak guard before publishing (put them in a file in a temporary
+   `git init` folder with a copy of `margin-cli` and `margin/`, then `./margin-cli privacy-check` there).
+4. `gh release create vX.Y.Z --target <full commit> --title vX.Y.Z --notes-file <notes>`. It makes the tag on
+   GitHub. Then `git fetch --tags` here.
 
 ### Publishing (only when the person asks)
 

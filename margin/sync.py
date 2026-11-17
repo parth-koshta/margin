@@ -8,7 +8,7 @@ import subprocess
 import time
 from datetime import datetime, timedelta
 
-from . import categorize, db, epf, fx, gmail, money, networth, parse, paths, review, sms, smsbackup
+from . import categorize, db, epf, fx, gmail, money, networth, parse, paths, release, review, sms, smsbackup
 
 DEFAULT_SETTINGS = {
     "backfill_days": 365,
@@ -30,6 +30,7 @@ DEFAULT_SETTINGS = {
     "extra_categories": {"out": [], "in": []},   # your own categories, e.g. {"out": ["Pets"], "in": ["Freelance"]}
     "project_categories": [],  # big one-off projects (e.g. "Home renovation"): spending, shown apart on Spent
     "old_hostnames": [],       # earlier addresses of the page that should forward to http://margin.localhost/
+    "check_updates": True,     # each night, ask GitHub whether a newer release of Margin is out (release.py)
 }
 
 
@@ -498,6 +499,11 @@ def run(quiet_notify: bool = False) -> int:
         reviews_written = review.run_due(conn, settings)
     except Exception as e:   # noqa: BLE001
         problems.append(f"Review: {e}")
+    try:   # is a newer release of Margin out? (only a git fetch from GitHub; never breaks the sync)
+        release.check(conn, settings)
+        conn.commit()
+    except Exception:   # noqa: BLE001
+        pass
     conn.close()
     progress.clear()
     flagged = sum(1 for r in reviews_written for f in r["flags"] if f["severity"] in ("high", "medium"))

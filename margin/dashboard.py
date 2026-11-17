@@ -117,6 +117,7 @@ code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--chip
 .syncstate{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);margin-right:6px;white-space:nowrap}
 .syncstate i{width:7px;height:7px;border-radius:50%;background:var(--pos);box-shadow:0 0 0 3px color-mix(in srgb,var(--pos) 18%,transparent)}
 .syncstate i.bad{background:var(--warn);box-shadow:0 0 0 3px var(--warn-soft)}
+.update{display:flex;align-items:center;font:inherit;font-size:12px;font-weight:500;color:var(--accent);background:var(--accent-soft);padding:5px 10px;border:0;border-radius:999px;margin-right:6px;white-space:nowrap;cursor:pointer}
 .syncbar{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-right:6px;white-space:nowrap}
 .syncbar .track{width:96px;height:4px;border-radius:2px;background:var(--track);overflow:hidden}
 .syncbar .fill{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
@@ -470,6 +471,7 @@ table.plain td.num{text-align:right}
     <span class="private" title="Everything Margin reads, stores and shows stays on this Mac"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>On this Mac</span>
     <span class="syncbar" id="syncbar" hidden><span id="sync-text"></span><span class="track"><span class="fill" id="sync-fill"></span></span></span>
     <span class="syncstate" id="status"></span>
+    <button class="update" id="update" hidden></button>
     <button class="iconbtn" id="syncbtn" hidden title="Sync now" aria-label="Sync now"><svg class="i" viewBox="0 0 24 24"><path d="M20 11.5A8 8 0 0 0 5.6 7M4 4v4h4M4 12.5A8 8 0 0 0 18.4 17M20 20v-4h-4"/></svg></button>
     <button class="iconbtn" id="lockbtn" hidden title="Lock Margin now (Touch ID to open again)" aria-label="Lock Margin now"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></button>
   </div>
@@ -726,6 +728,12 @@ function status(){
   $('status').innerHTML = `<i class="${st.ok&&!st.problems.length?'':'bad'}"></i>Synced ${esc(when)}`;
   $('status').title = `Updated ${at.toLocaleString(LOC,{dateStyle:'medium',timeStyle:'short'})} · syncs nightly at 00:00 · ${D.txns.length.toLocaleString(LOC)} transactions`;
   const p=$('problems'); p.hidden=!st.problems.length; p.innerHTML=st.problems.map(x=>`<li>${esc(x)}</li>`).join('');
+  // a newer release of Margin (found by the nightly check): installed only by the person, with margin update
+  const u=st.update, ub=$('update'); ub.hidden=!u;
+  if(u){ const how='run margin update in Terminal, or ask Claude Code to update Margin';
+    ub.textContent=`Update: ${u.version}`;
+    ub.title=`Margin ${u.version} is out (${u.changes} change${u.changes===1?'':'s'}). To install it, ${how}. Your data isn't touched.`;
+    ub.onclick=()=>toast(`To install Margin ${u.version}, ${how}.`); }
 }
 status();
 

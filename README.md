@@ -107,8 +107,11 @@ Some alerts come only by text (many UPI payments in India, for one), so Margin r
 
 ### Keep it up to date
 
-`margin update` shows what's new and asks you, then gets exactly that (fast-forward only), runs the tests,
-rebuilds and restarts Margin. If the tests fail it goes back to the version you had. It never touches your data.
+Margin comes in numbered releases (v0.1.0, v0.2.0, …; see the repository's Releases page). When a new one is
+out, the page shows **Update** at the top and `margin doctor` says so. `margin update` shows what's in it and asks
+you, then gets exactly that (fast-forward only), runs the tests, rebuilds and restarts Margin. If the tests fail it
+goes back to the version you had. It never touches your data. Or ask Claude Code to update Margin.
+`margin --version` shows which version you have.
 
 ## Works with any AI
 
@@ -213,6 +216,9 @@ and use it to improve its models, so check your plan's data settings first. Turn
   [What the AI sees](#what-the-ai-sees). With Ollama and a local model nothing leaves your Mac. Turn it off with
   `margin setup-ai` → None (or `margin config set ai_sort false` and `margin config set ai_review false`); the
   automatic checks still run.
+- **New versions**: once a night Margin asks GitHub whether a newer release of Margin is out (a `git fetch` of
+  this project, as `margin update` does). GitHub sees your Mac's IP address, nothing about you or your money.
+  Installing it is always up to you. `margin config set check_updates false` turns the check off.
 - Logs record counts only. Notifications never show amounts or payees.
 - **Claude Code in this folder works without your data.** Claude uses `margin` commands that print statuses
   and counts only (`margin doctor --json`, `margin config get`), and a hook in `.claude/settings.json` (the data
@@ -233,7 +239,7 @@ and use it to improve its models, so check your plan's data settings first. Turn
 | `margin doctor` | Check that everything works (`--json`: statuses and counts only, for Claude Code) |
 | `margin setup-ai` | Choose the AI that sorts and writes the reviews ([Works with any AI](#works-with-any-ai)) |
 | `margin setup` | Set Margin up, or finish setting it up; shows what it will change and asks; safe to run again |
-| `margin update` | Show what's new and ask, then get it, test it, rebuild and restart (`--check`: only list it) |
+| `margin update` | Show what's in the newest release and ask, then get it, test it, rebuild and restart (`--check`: only list it) |
 | `margin config get` / `margin config set currency USD` | Read or change a setting without opening `settings.json` |
 | `margin rule "swiggy" "Food & dining"` | Put matching payees in a category (past and future) |
 | `margin trust "mybank.in"` | Count alerts from a sender Margin didn't know was a bank |

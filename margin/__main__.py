@@ -373,9 +373,22 @@ def cmd_config(a) -> int:
     return config.main(a)
 
 
+class _Version(argparse.Action):
+    """`margin --version`: this copy's release (release.py), worked out only when asked."""
+
+    def __init__(self, option_strings, dest, **kw):
+        super().__init__(option_strings, dest, nargs=0, help="show this copy's version")
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from . import release
+        print(f"Margin {release.version()}")
+        parser.exit()
+
+
 def main() -> int:
     os.umask(0o077)     # everything Margin writes (database, rules, statements, PDF reader) is yours alone
     p = argparse.ArgumentParser(prog="margin", description="Margin: private money tracker")
+    p.add_argument("--version", action=_Version)
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("sync", help="pull new email/SMS and rebuild the dashboard")
     s.add_argument("--quiet", action="store_true", help="no macOS notification on problems")
@@ -429,9 +442,11 @@ def main() -> int:
     s.add_argument("--yes", action="store_true", help="make the changes (the person agreed); without it, outside "
                    "a Terminal, setup only reports")
     s.set_defaults(fn=cmd_setup)
-    s = sub.add_parser("update", help="get the latest Margin, test it, rebuild and restart (never touches your data)")
+    s = sub.add_parser("update", help="get the newest release of Margin, test it, rebuild and restart (never touches "
+                                      "your data)")
     s.add_argument("--check", action="store_true", help="list what's new; change nothing")
-    s.add_argument("--to", metavar="COMMIT", help="install exactly up to this commit from --check (the person agreed)")
+    s.add_argument("--to", metavar="VERSION", help="install exactly this release (or commit) from --check (the "
+                                                   "person agreed)")
     s.add_argument("--force", action="store_true", help="test, rebuild and restart even when already up to date")
     s.set_defaults(fn=cmd_update)
     s = sub.add_parser("config", help="get or set a setting: margin config set currency USD")

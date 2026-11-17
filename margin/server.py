@@ -26,7 +26,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import ai, categorize, dashboard, db, icon, llm, lock, networth, paths, review, suggest, sync, tidy
+from . import ai, categorize, dashboard, db, icon, llm, lock, networth, paths, release, review, suggest, sync, tidy
 
 IDLE_MINUTES = 20
 HOSTNAME = "margin.localhost"                  # *.localhost always means this Mac: Chrome and macOS never ask the
@@ -209,8 +209,12 @@ def _sort_in_background() -> bool:
 
 def _status(conn) -> dict:
     last = db.get_state(conn, "last_sync")
-    return json.loads(last) if last else {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "ok": True, "problems": [],
-                                          "counts": {}}
+    st = json.loads(last) if last else {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "ok": True, "problems": [],
+                                        "counts": {}}
+    newer = release.notice(conn)       # a newer release of Margin, from the nightly check
+    if newer:
+        st["update"] = newer
+    return st
 
 
 def _after_change(conn) -> None:

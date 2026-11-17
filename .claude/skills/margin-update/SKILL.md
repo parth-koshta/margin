@@ -1,6 +1,6 @@
 ---
 name: margin-update
-description: Update the person's Margin to the latest version with `margin update` (shows what's new, then with their yes fast-forwards to exactly that, tests on a temporary folder, rebuilds, restarts) and verify it still works, without touching their data. Use when they ask to update or upgrade Margin, get the latest version, or after they hear about a fix.
+description: Update the person's Margin to the newest release with `margin update` (shows what's in it, then with their yes fast-forwards to exactly that, tests on a temporary folder, rebuilds, restarts) and verify it still works, without touching their data. Use when they ask to update or upgrade Margin, get the latest version, see "Update" on Margin's page, or after they hear about a fix.
 ---
 
 # Update Margin
@@ -11,8 +11,8 @@ Read [AGENTS.md](../../../AGENTS.md) first (Rules). `margin update` never reads 
 
 ## Steps
 
-1. **What's new?** `margin update --check`. It fetches and lists the incoming commits (how many, and each one's
-   subject) and changes nothing. If it says up to date, say so and stop. If it says the branch doesn't follow
+1. **What's new?** `margin update --check`. It fetches and lists the changes in the newest release (its version,
+   how many changes, and each one's subject) and changes nothing. If it says up to date, say so and stop. If it says the branch doesn't follow
    GitHub, or this isn't a git checkout, explain and stop: they got Margin another way, and updating means
    cloning it again (README) and running `margin setup` there.
 
@@ -21,8 +21,8 @@ Read [AGENTS.md](../../../AGENTS.md) first (Rules). `margin update` never reads 
 
 3. **Before.** `margin doctor --json`: note which checks were ok, so you can compare afterwards.
 
-4. **Update** to exactly what they saw: `margin update --to <commit>`, with the commit `--check` printed.
-   Commits that arrived on GitHub after the check aren't included. What it does, in order:
+4. **Update** to exactly what they saw: `margin update --to <version>`, with the version `--check` printed
+   (such as `v0.2.0`). Anything released after the check isn't included. What it does, in order:
    - refuses while a sync runs (run it again when `margin doctor --json` shows `sync.running` false);
    - fast-forwards to that commit. It never merges. If it refuses, their copy has local commits:
      `git -C <repo> status` and `git log @{u}..` show what (code only, safe to look at). Ask them what to do;
@@ -39,7 +39,8 @@ Read [AGENTS.md](../../../AGENTS.md) first (Rules). `margin update` never reads 
    - If update said "The Python changed", Full Disk Access has to be given again to the new path
      (`python_for_full_disk_access`): walk them through it (AGENTS.md step 4).
 
-6. **Tell them** in two or three lines: from which version to which (`margin update` prints both), that the tests
+6. **Tell them** in two or three lines: from which version to which (`margin update` prints both; `margin
+   --version` shows it), that the tests
    passed, and anything they need to do. Don't open the page yourself; they can.
 
 In their own Terminal they can simply run `margin update`: it shows the list and asks them.

@@ -5,8 +5,9 @@ first and only does what's missing. It stops at the steps only the person may do
 forwarding and Full Disk Access, statement passwords) and says exactly what to do. In the person's own Terminal it
 waits for them and checks again; run by Claude Code (no terminal) it lists them and exits with status 3.
 
-update gets the latest Margin by fast-forward only, runs the tests on a temporary folder (and goes back if they
-fail), rebuilds the Swift helpers and the app, and reloads the launchd agents. It never reads or changes the
+update gets the newest release of Margin (a tag vX.Y.Z on GitHub's main, release.py; the newest commit when there
+are no releases) by fast-forward only, runs the tests on a temporary folder (and goes back if they fail), rebuilds
+the Swift helpers and the app, and reloads the launchd agents. It never reads or changes the
 person's data: money.db, settings.json, rules.json and statements stay exactly as they are.
 
 Nothing here prints amounts, payees, names or numbers: only what was done and what's left.
@@ -26,7 +27,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from . import config, health, paths
+from . import config, health, paths, release
 
 BIN_DIR = Path.home() / ".local" / "bin"
 SYMBOL = {"ok": "✓", "done": "✓", "would": "·", "skipped": "·", "optional": "·", "failed": "✗", "todo": "→"}
@@ -592,36 +593,44 @@ def update(a, app_path: str, install_app: Callable[[], int], install_schedule: C
     if not a.check and health.sync_running():
         print("A sync is running (margin sync shows it). Run margin update again when it's done.")
         return 1
-    if _git("fetch", "--quiet").returncode != 0:
+    if not release.fetch():
         print("Couldn't reach GitHub, so nothing changed.")
         return 1
     head = _git("rev-parse", "HEAD").stdout.strip()
-    target = _git("rev-parse", upstream).stdout.strip()
     if a.to:
-        target = _git("rev-parse", "--verify", "--quiet", f"{a.to}^{{commit}}").stdout.strip()
+        target, name = _git("rev-parse", "--verify", "--quiet", f"{a.to}^{{commit}}").stdout.strip(), a.to
         if not target or _git("merge-base", "--is-ancestor", target, upstream).returncode != 0:
             print(f"{a.to} isn't a commit on {upstream}, so nothing changed. margin update --check lists what's new.")
             return 1
+    else:
+        newest = release.latest(upstream)      # changes reach people once they're released
+        if newest:
+            name, target = newest
+        else:                                  # a copy of a project with no releases: its newest commit
+            target, name = _git("rev-parse", upstream).stdout.strip(), ""
+    if _git("merge-base", "--is-ancestor", target, head).returncode == 0:      # already has it, or is past it
+        if a.force and not a.check:
+            return _after(None, head, app_path, install_app, install_schedule)
+        print(f"Margin is up to date ({release.version()}).")
+        return 0
     if _git("merge-base", "--is-ancestor", head, target).returncode != 0:
         print(f"Can't update by fast-forward, so nothing changed: this copy has commits that aren't on {upstream}. "
               "Keep them on a branch, or ask for help. (Margin never merges.)")
         return 1
     commits = _incoming(target)
-    if not commits:
-        if a.force and not a.check:
-            return _after(None, head, app_path, install_app, install_schedule)
-        print(f"Margin is up to date ({head[:7]}).")
-        return 0
-    print(f"{len(commits)} new change{'s' if len(commits) != 1 else ''} on {upstream} ({head[:7]} → {target[:7]}):")
+    what = f"Margin {name}" if name.startswith("v") else f"On {upstream}"
+    print(f"{what}: {len(commits)} new change{'s' if len(commits) != 1 else ''} "
+          f"({release.version()} → {name if name.startswith('v') else target[:7]}):")
     for line in commits[:40]:
         print(f"  {line}")
     if len(commits) > 40:
         print(f"  … and {len(commits) - 40} more")
+    exact = name if name.startswith("v") else target[:12]
     if a.check:
-        print(f"To install exactly these once the person agrees: margin update --to {target[:12]}")
+        print(f"To install exactly these once the person agrees: margin update --to {exact}")
         return 0
     if not a.to and not (_terminal() and _yes("Install them?")):
-        print(f"Nothing changed. To install exactly these once the person agrees: margin update --to {target[:12]}")
+        print(f"Nothing changed. To install exactly these once the person agrees: margin update --to {exact}")
         return EXIT_WAITING
     merge = _git("merge", "--ff-only", "--quiet", target)
     if merge.returncode != 0:
@@ -684,5 +693,5 @@ def _after(old: str | None, new: str, app_path: str, install_app: Callable[[], i
             restarted.append(label)
     if restarted:
         print(f"✓ Restarted {len(restarted)} more Margin service{'s' if len(restarted) != 1 else ''}")
-    print(f"Margin is up to date ({new[:7]}). Your data wasn't touched.")
+    print(f"Margin is up to date ({release.version()}). Your data wasn't touched.")
     return 0

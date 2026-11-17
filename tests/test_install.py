@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from margin import config, db, health, install, paths
+from margin import config, db, health, install, paths, release, server, sync
 
 
 def _clean_data():
@@ -484,6 +484,124 @@ class Update(unittest.TestCase):
         self.assertTrue(seen["MARGIN_DATA"].startswith(os.path.realpath(tempfile.gettempdir()))
                         or seen["MARGIN_DATA"].startswith(tempfile.gettempdir()))
         self.assertNotIn(install.FINISH_ENV, seen)
+
+    # --- releases: a tag vX.Y.Z on main; update installs the newest one, not the newest commit ---------------------
+    def release(self, tag, name=None):
+        """The maintainer makes a release (of a new commit `name`, or of main as it is) and pushes it."""
+        if name:
+            self.commit(self.other, name, push=True)
+        _git(self.other, "tag", tag)
+        _git(self.other, "push", "-q", "origin", tag)
+
+    def test_installs_the_newest_release_not_the_newest_commit(self):
+        self.release("v0.2.0", "second")
+        self.commit(self.other, "not released yet", push=True)
+        rc, out = self.update(check=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("Margin v0.2.0: 1 new change", out)
+        self.assertIn(" second", out)
+        self.assertNotIn("not released yet", out)
+        self.assertIn("margin update --to v0.2.0", out)
+        self.update(to="v0.2.0")
+        self.assertEqual(self.head(), _git(self.other, "rev-parse", "v0.2.0"))
+        rc, out = self.update(terminal=True, answer="y")      # already on the newest release
+        self.assertIn("up to date (v0.2.0)", out)
+
+    def test_a_yes_in_their_own_terminal_gets_the_newest_release(self):
+        self.release("v0.2.0", "second")
+        self.commit(self.other, "not released yet", push=True)
+        self.update(terminal=True, answer="y")
+        self.assertEqual(self.head(), _git(self.other, "rev-parse", "v0.2.0"))
+
+    def test_the_highest_version_wins_and_other_tags_dont_count(self):
+        self.release("v0.9.0", "nine")
+        self.release("v0.10.0", "ten")
+        self.release("v1.0.0-beta", "beta")                    # not a release
+        _git(self.other, "checkout", "-q", "-b", "side")
+        self.commit(self.other, "side branch")
+        _git(self.other, "tag", "v9.0.0")                      # not on main
+        _git(self.other, "push", "-q", "origin", "v9.0.0")
+        rc, out = self.update(check=True)
+        self.assertIn("margin update --to v0.10.0", out)
+        self.assertNotIn("beta", out)
+
+    def test_a_copy_past_the_newest_release_is_up_to_date(self):
+        self.release("v0.1.0")                                 # the commit the copy already has
+        self.commit(self.copy, "the maintainer's next change")
+        _git(self.copy, "push", "-q", "origin", "HEAD:main")
+        rc, out = self.update(check=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("up to date (v0.1.0 + 1 change)", out)
+
+    def test_a_moved_tag_is_taken_as_github_has_it(self):
+        self.release("v0.2.0", "second")
+        self.update(check=True)                                 # the copy has the tag now
+        fixed = self.commit(self.other, "fixed release", push=True)
+        _git(self.other, "tag", "-f", "v0.2.0")
+        _git(self.other, "push", "-q", "-f", "origin", "v0.2.0")
+        rc, out = self.update(to="v0.2.0")
+        self.assertEqual(self.head(), fixed)
+
+
+class Release(unittest.TestCase):
+    """The nightly check for a newer release, what the page and the doctor show: on made-up repositories."""
+
+    def setUp(self):
+        u = Update("setUp")
+        u.setUp()
+        self.addCleanup(shutil.rmtree, u.tmp, ignore_errors=True)
+        self.u, self.copy = u, u.copy
+        self.conn = _mem()
+        patcher = mock.patch.object(paths, "PROJECT_DIR", self.copy)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        release._running.cache_clear()
+        self.addCleanup(release._running.cache_clear)
+
+    def test_finds_a_newer_release_and_the_page_shows_it(self):
+        self.assertIsNone(release.check(self.conn, {}))
+        self.u.release("v0.2.0", "second")
+        self.u.commit(self.u.other, "not released yet", push=True)
+        self.assertEqual(release.check(self.conn, {}), {"version": "v0.2.0", "changes": 1})
+        self.assertEqual(release.notice(self.conn), {"version": "v0.2.0", "changes": 1})
+        self.assertEqual(server._status(self.conn)["update"], {"version": "v0.2.0", "changes": 1})
+        self.assertIn("v0.2.0 is out", [c for c in health.checks() if c["id"] == "version"][0]["text"])
+
+    def test_after_updating_the_notice_goes_until_the_next_check(self):
+        self.u.release("v0.2.0", "second")
+        release.check(self.conn, {})
+        _git(self.copy, "merge", "-q", "--ff-only", "v0.2.0")   # what margin update does; then it restarts the page
+        release._running.cache_clear()
+        self.assertIsNone(release.notice(self.conn))
+        self.assertNotIn("update", server._status(self.conn))
+        self.assertIsNone(release.check(self.conn, {}))
+        self.assertEqual(release.version(), "v0.2.0")
+
+    def test_turned_off_it_asks_github_nothing_and_shows_nothing(self):
+        self.u.release("v0.2.0", "second")
+        release.check(self.conn, {})
+        with mock.patch.object(release, "fetch", side_effect=AssertionError("asked GitHub")):
+            self.assertIsNone(release.check(self.conn, {"check_updates": False}))
+        self.assertIsNone(release.notice(self.conn))
+
+    def test_offline_it_keeps_what_it_knew(self):
+        self.u.release("v0.2.0", "second")
+        release.check(self.conn, {})
+        with mock.patch.object(release, "fetch", return_value=False):
+            release.check(self.conn, {})
+        self.assertEqual(release.notice(self.conn), {"version": "v0.2.0", "changes": 1})
+
+    def test_the_setting_exists_and_is_on(self):
+        self.assertIs(sync.DEFAULT_SETTINGS["check_updates"], True)
+        self.assertIn("check_updates", config.known())
+
+
+def _mem():
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(db.SCHEMA)
+    return conn
 
 
 if __name__ == "__main__":

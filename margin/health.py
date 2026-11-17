@@ -206,6 +206,10 @@ def checks() -> list[dict]:
         else:
             add("last_sync", False, "Never synced: margin sync", fix="margin sync")
         conn.close()
+    from . import release
+    newer = release.newer()          # from what was last fetched: nothing goes to GitHub here
+    add("version", True, f"Margin {release.version()}" + (f": {newer['version']} is out, margin update installs it"
+                                                          if newer else ""))
     return out
 
 
@@ -254,7 +258,7 @@ def ai_status(settings: dict) -> dict:
 
 def report(app_path: str) -> dict:
     """Everything `margin doctor --json` prints."""
-    from . import gmail
+    from . import gmail, release
     found = checks()
     for c in found:
         c.pop("text", None)
@@ -282,7 +286,8 @@ def report(app_path: str) -> dict:
         "ai": ai_status(settings),
         "sync": {"running": progress is not None, "progress": progress},
         "app": {"installed": os.path.exists(app_path), "page_service": _loaded(paths.WEB_LABEL)},
-        "margin": {"commit": _git("rev-parse", "--short", "HEAD"), "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
+        "margin": {"version": release.version(), "update_available": release.newer(),
+                   "commit": _git("rev-parse", "--short", "HEAD"), "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
                    "folder": tilde(paths.PROJECT_DIR)},
         "python_for_full_disk_access": tilde(python()),
     }
