@@ -339,6 +339,16 @@ service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the 
 `margin/macapp.swift`, `margin app install` builds the app again (the demo's own copy rebuilds itself), and
 `./margin-cli demo --app` shows it on made-up data.
 
+The project website is `docs/`: a landing page written by hand (`docs/index.html`) and the demo as read-only pages
+(`docs/demo/`). `./margin-cli demo --export` makes those from the demo's made-up people in a temporary folder
+(`site.py`): the page itself, with a stand-in for its server inside, its clock set to the day it was made, and
+nothing loaded from elsewhere. To look at the site: export, then `python3 -m http.server 8779 --directory docs`.
+The demo pages are never committed (`.gitignore`): their invented numbers can equal the person's real ones by
+chance, which the leak guard rightly refuses, and you never look for which ones did. The website workflow
+(`.github/workflows/website.yml`) makes them on GitHub's Mac, runs the tests and publishes `docs/`.
+`tests/test_site.py` checks the pages hold only the demo's data and that no page loads anything from another site.
+No file names the GitHub account (the leak guard would stop it): the landing page reads it from its own address.
+
 | File | What it does |
 |---|---|
 | `sync.py` | The nightly pipeline: Gmail + texts → payments, balances, reviews, investments |
@@ -354,6 +364,7 @@ service (`launchctl kickstart -k gui/$(id -u)/com.$(whoami).margin.web`) or the 
 | `macapp.py`, `macapp.swift`, `glance.py` | The Margin app: the page in its own window and the menu bar glance (AppKit + WebKit, built with swiftc); the glance's figures |
 | `pdf.py`, `pdftext.swift`, `keychain.py` | Locked PDFs via PDFKit; Keychain secrets |
 | `demo.py` | The made-up demo people and the stand-ins for the AI, sync and Touch ID |
+| `site.py`, `docs/` | The project website: the landing page, and the demo as read-only pages (`margin demo --export`) |
 | `privacy.py`, `.githooks/` | The leak guard |
 | `install.py`, `health.py`, `config.py` | `margin setup` and `update`; `doctor` (and `--json`); `config get/set` |
 | `release.py` | Versions: the newest release (a tag `vX.Y.Z`), this copy's version, the nightly check for a newer one |
@@ -383,6 +394,14 @@ at once and `margin update` offers it to everyone:
    `git init` folder with a copy of `margin-cli` and `margin/`, then `./margin-cli privacy-check` there).
 4. `gh release create vX.Y.Z --target <full commit> --title vX.Y.Z --notes-file <notes>`. It makes the tag on
    GitHub. Then `git fetch --tags` here.
+
+### The website (only when the maintainer asks)
+
+The site is off until the maintainer turns it on, and only they do (or tell you to): Settings → Pages → Source:
+**GitHub Actions**, and Settings → Secrets and variables → Actions → Variables: `WEBSITE` = `on`. From then on the
+website workflow publishes `docs/` at `https://<owner>.github.io/margin/` whenever `docs/` or Margin's code changes
+on main, and on the 1st of each month so the demo's "today" stays recent. Before merging a change to the site:
+export, the tests, the leak guard, and a look in the browser at both demo people, light and dark, at phone width.
 
 ### Publishing (only when the person asks)
 

@@ -35,6 +35,11 @@ client_secret*.json
 *.webm
 !docs/media/**
 
+# The website's demo pages: made by `margin demo --export`, here to look at and on GitHub when the site is published
+# (.github/workflows/website.yml). Never committed: their invented numbers can equal your real ones by chance, and
+# the leak guard rightly refuses those.
+docs/demo/
+
 __pycache__/
 .DS_Store
 .claude/settings.local.json

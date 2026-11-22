@@ -244,7 +244,7 @@ and use it to improve its models, so check your plan's data settings first. Turn
 | `margin rule "swiggy" "Food & dining"` | Put matching payees in a category (past and future) |
 | `margin trust "mybank.in"` | Count alerts from a sender Margin didn't know was a bank |
 | `margin tidy` | Sort out in Terminal instead of the page |
-| `margin demo [--india] [--lock] [--fresh] [--app]` | The made-up demo (`--app`: in the Margin app's window) |
+| `margin demo [--india] [--lock] [--fresh] [--app]` | The made-up demo (`--app`: in the Margin app's window; `--export`: as read-only pages for the project website, in `docs/demo/`) |
 | `margin privacy-check` | Look for your personal details in the code (see [Leak guard](#leak-guard)) |
 | `margin schedule status` | Is the nightly sync installed? |
 

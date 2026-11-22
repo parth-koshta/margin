@@ -1,0 +1,44 @@
+# The project website (docs/) on GitHub Pages. Off until the maintainer turns it on: Settings → Pages → Source:
+# GitHub Actions, and Settings → Secrets and variables → Actions → Variables: WEBSITE = on.
+# The demo pages are made here, on GitHub's Mac, from the code alone (`margin demo --export`): it has no one's data.
+name: website
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "margin/**", "tests/**", ".github/workflows/website.yml"]
+  schedule:
+    - cron: "17 3 1 * *"            # the 1st of each month, so the demo's "today" stays recent
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: website
+  cancel-in-progress: false
+jobs:
+  build:
+    if: vars.WEBSITE == 'on'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The demo as read-only pages (made-up people only)
+        run: ./margin-cli demo --export
+      - name: Tests, including that the pages hold only the demo's data and load nothing from elsewhere
+        run: /usr/bin/python3 -m unittest discover -s tests -t .
+      - name: Leak guard (general patterns)
+        run: ./margin-cli privacy-check
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

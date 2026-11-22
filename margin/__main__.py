@@ -206,6 +206,9 @@ def cmd_privacy(a) -> int:
 
 
 def cmd_demo(a) -> int:
+    if a.export is not None:
+        from . import site
+        return site.export(a.export or None)
     from . import demo
     return demo.main(a)
 
@@ -468,6 +471,8 @@ def main() -> int:
     s.add_argument("--india", action="store_true", help="the Indian person in rupees instead of the US person in dollars")
     s.add_argument("--no-open", action="store_true", help="don't open the browser")
     s.add_argument("--app", action="store_true", help="open it in the Margin app's window instead of the browser")
+    s.add_argument("--export", nargs="?", const="", metavar="FOLDER",
+                   help="write both demo people as read-only pages for the project website (docs/demo); serves nothing")
     s.set_defaults(fn=cmd_demo)
     a = p.parse_args()
     return a.fn(a)
