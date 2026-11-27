@@ -26,6 +26,10 @@ jobs:
         run: /usr/bin/python3 -m unittest discover -s tests -t .
       - name: Leak guard (general patterns)
         run: ./margin-cli privacy-check
+      - name: The landing page's GitHub links, so a copy of the site works on any address
+        run: |
+          sed -i '' 's|<meta name="repo" content="">|<meta name="repo" content="${{ github.repository }}">|' docs/index.html
+          grep -q '<meta name="repo" content="${{ github.repository }}">' docs/index.html
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

@@ -145,6 +145,7 @@ class Website(unittest.TestCase):
         self.assertIn('href="demo/india.html"', html)
         # The GitHub account is read from the site's address (<owner>.github.io), never written in the file.
         self.assertNotRegex(html, r"github\.com/(?!&lt;owner&gt;)[\w-]+/margin")
+        self.assertIn('<meta name="repo" content="">', html)              # filled only when published
 
     def test_demo_pages_are_never_committed(self):
         """Their invented numbers can equal the owner's real ones by chance: the leak guard would rightly refuse

@@ -4,6 +4,7 @@
 <title>Margin: your money, on your Mac</title>
 <meta name="description" content="Margin is a free, open-source money tracker for macOS. It reads your bank alerts and statements and keeps everything on your Mac.">
 <meta name="color-scheme" content="light dark">
+<meta name="repo" content="">
 <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0c0c0d" media="(prefers-color-scheme: dark)">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23111113%22/%3E%3Cpath%20d%3D%22M9.5%2023V15.5a3.25%203.25%200%200%201%206.5%200V23M16%2015.5v-3a3.25%203.25%200%200%201%206.5%200V23%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%223.3%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22/%3E%3C/svg%3E">
@@ -291,13 +292,16 @@ cd ~/projects/margin</pre></div></li>
 </div></footer>
 
 <script>
-// GitHub links. The owner's name isn't written in this file (the leak guard keeps it out of the code): on GitHub
-// Pages the site's own address says it (<owner>.github.io/<repo>/). Elsewhere, such as a local preview, the links
-// go to GitHub's front page and the clone command keeps its <owner> placeholder.
+// GitHub links. The owner's name isn't written in this file (the leak guard keeps it out of the code): the website
+// workflow fills <meta name="repo"> with <owner>/<repo> when it publishes, so a copy of the published site works on any
+// address. Without it, GitHub Pages' own address says it (<owner>.github.io/<repo>/). Elsewhere, such as a local
+// preview, the links go to GitHub's front page and the clone command keeps its <owner> placeholder.
 (()=>{
+  const filled=(document.querySelector('meta[name="repo"]')||{}).content||'';
   const m=location.hostname.match(/^([a-z0-9-]+)\.github\.io$/i), repo=location.pathname.split('/')[1];
-  if(!m||!repo) return;
-  const base=`https://github.com/${m[1]}/${repo}`;
+  const name=/^[\w.-]+\/[\w.-]+$/.test(filled) ? filled : (m&&repo ? `${m[1]}/${repo}` : '');
+  if(!name) return;
+  const base=`https://github.com/${name}`;
   document.querySelectorAll('a[data-gh]').forEach(a=>{ a.href=base+a.dataset.gh; });
   document.querySelectorAll('[data-clone]').forEach(s=>{ s.textContent=`git clone ${base}.git`; });
 })();
