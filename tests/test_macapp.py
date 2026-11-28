@@ -50,7 +50,7 @@ class InfoPlist(unittest.TestCase):
 
 
 class MenuBarIcon(unittest.TestCase):
-    """The menu bar's m: icon.py's shape, black on clear (a template), centred, and only a picture."""
+    """The menu bar's mark: icon.py's shape, black on clear (a template), centred, and only a picture."""
 
     def pixels(self, px):
         import struct

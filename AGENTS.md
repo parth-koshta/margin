@@ -347,7 +347,15 @@ The demo pages are never committed (`.gitignore`): their invented numbers can eq
 chance, which the leak guard rightly refuses, and you never look for which ones did. The website workflow
 (`.github/workflows/website.yml`) makes them on GitHub's Mac, runs the tests and publishes `docs/`.
 `tests/test_site.py` checks the pages hold only the demo's data and that no page loads anything from another site.
-No file names the GitHub account (the leak guard would stop it): the landing page reads it from its own address.
+No file names the GitHub account (the leak guard would stop it): the landing page reads it from its own address,
+and the workflow writes the repo and the share image's full address (`docs/media/og.png`, for link previews) into the
+published copy. The share image is drawn from `design/og.html` (open it in Chrome at 1200 x 630 and save a
+screenshot). Words in the landing page's drawn-in-HTML bits of Margin (the bank alert, the rows, Sort out) are the
+demo's and the page's own: change them when those change. Everything that moves stops under reduced motion, and the
+page reads the same without JavaScript.
+
+Margin's icon (`icon.py`) is three bars on a near-black tile: money in, money out, and what's left (green), the
+margin. The same shapes make the page's icon, the Mac app's icon, its menu bar icon (`macapp.py`) and the website's.
 
 | File | What it does |
 |---|---|

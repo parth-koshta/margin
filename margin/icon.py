@@ -1,27 +1,41 @@
-"""Margin's icon: a lowercase m drawn as two bars with rounded tops, the second one higher, white on a near-black
-tile. It reads as the name and as a chart that rises, and stays clear at 16 pixels. One set of shapes makes the SVG
-(browsers that take it), the PNGs (Safari, bookmarks) and the Margin app's icon, so they always match. Standard
-library only: the PNGs are drawn here with 4x4 anti-aliasing and cached in memory.
+"""Margin's icon: three bars on a near-black tile, read top to bottom like a statement. Money in (white), money out
+(dimmer), and what's left (green), which starts where money out ends: the margin. It stays clear at 16 pixels. One set
+of shapes makes the SVG (browsers that take it), the PNGs (Safari, bookmarks) and the Margin app's icon, so they always
+match. Standard library only: the PNGs are drawn here with 4x4 anti-aliasing and cached in memory.
 """
 from __future__ import annotations
 
 import functools
-import math
 import os
 import struct
 import subprocess
 import tempfile
 import zlib
 
-# 32 x 32 grid. The m is one stroke (width STROKE, round ends) along three legs and two half-circle tops.
-TILE, GLYPH = "#111113", "#ffffff"
-APP_TILE = ("#2a2a2f", "#0c0c0e")           # the Mac app icon: a soft top-to-bottom shade
+# 32 x 32 grid. Each bar is a stroke (width STROKE, round ends) from x0 to x1 at height y.
+TILE, GLYPH, LEFT = "#111113", "#ffffff", "#3fd07a"
+OUT_OPACITY = .45                            # money out: the glyph colour, see-through
+APP_TILE = ("#2a2a2f", "#0c0c0e")            # the Mac app icon: a soft top-to-bottom shade
 APP_GLYPH = ("#ffffff", "#d9e6fb")
+APP_LEFT = ("#5fe394", "#25b466")
 TILE_RADIUS = 8
-STROKE = 3.3
-LEGS = [(9.5, 15.5, 23.0), (16.0, 12.5, 23.0), (22.5, 12.5, 23.0)]      # x, top, bottom
-ARCS = [(12.75, 15.5, 3.25), (19.25, 12.5, 3.25)]                       # centre x, centre y, radius (top half)
-PATH = "M9.5 23V15.5a3.25 3.25 0 0 1 6.5 0V23M16 15.5v-3a3.25 3.25 0 0 1 6.5 0V23"
+STROKE = 4.4
+BARS = [("in", 9.5, 9.0, 23.0), ("out", 16.0, 9.0, 16.0), ("left", 22.5, 16.0, 23.0)]   # kind, y, x0, x1
+
+
+def _n(v: float) -> str:
+    return f"{v:g}"
+
+
+PATHS = {kind: f"M{_n(x0)} {_n(y)}H{_n(x1)}" for kind, y, x0, x1 in BARS}
+
+
+def bars() -> str:
+    """The three bars as SVG paths (no tile). Each path has the class b-<kind>, so a page can animate them."""
+    paint = {"in": f'stroke="{GLYPH}"', "out": f'stroke="{GLYPH}" stroke-opacity="{OUT_OPACITY:g}"',
+             "left": f'stroke="{LEFT}"'}
+    return (f'<g fill="none" stroke-width="{_n(STROKE)}" stroke-linecap="round">'
+            + "".join(f'<path class="b-{k}" d="{PATHS[k]}" {paint[k]}/>' for k, *_ in BARS) + "</g>")
 
 
 def svg() -> bytes:
@@ -29,8 +43,7 @@ def svg() -> bytes:
             f'<rect width="32" height="32" rx="{TILE_RADIUS}" fill="{TILE}"/>'
             f'<rect x=".4" y=".4" width="31.2" height="31.2" rx="{TILE_RADIUS - .4}" fill="none" stroke="#fff" '
             f'stroke-opacity=".14" stroke-width=".8"/>'          # a faint edge, so the tile shows on dark backgrounds
-            f'<path d="{PATH}" fill="none" stroke="{GLYPH}" stroke-width="{STROKE}" stroke-linecap="round" '
-            f'stroke-linejoin="round"/></svg>').encode()
+            f'{bars()}</svg>').encode()
 
 
 def _in_tile(x: float, y: float, x0: float, x1: float, r: float) -> bool:
@@ -41,14 +54,14 @@ def _in_tile(x: float, y: float, x0: float, x1: float, r: float) -> bool:
     return (x - cx) ** 2 + (y - cy) ** 2 <= r * r
 
 
-def _in_m(x: float, y: float) -> bool:
-    """Is the point (on the 32 grid) on the m's stroke?"""
+def _bar_at(x: float, y: float) -> str | None:
+    """Which bar the point (on the 32 grid) is on, if any."""
     half = STROKE / 2
-    for lx, top, bottom in LEGS:
-        cy = min(max(y, top), bottom)
-        if (x - lx) ** 2 + (y - cy) ** 2 <= half * half:
-            return True
-    return any(y <= cy and abs(math.hypot(x - cx, y - cy) - r) <= half for cx, cy, r in ARCS)
+    for kind, by, x0, x1 in BARS:
+        cx = min(max(x, x0), x1)
+        if (x - cx) ** 2 + (y - by) ** 2 <= half * half:
+            return kind
+    return None
 
 
 def _rgb(colour: str) -> tuple[int, int, int]:
@@ -59,7 +72,7 @@ def _mix(a: tuple, b: tuple, t: float) -> tuple:
     return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
 
 
-# Where the tile sits on the 32-unit canvas: (inset, corner radius). The m scales with the tile.
+# Where the tile sits on the 32-unit canvas: (inset, corner radius). The bars scale with the tile.
 STYLES = {
     "tab": (0, TILE_RADIUS),
     "square": (0, 0),                  # Apple rounds touch icons itself
@@ -73,8 +86,10 @@ def png(size: int, style: str = "tab") -> bytes:
     inset, radius = STYLES[style]
     k = (32 - 2 * inset) / 32
     shade = style == "mac"
-    tile = (_rgb(APP_TILE[0]), _rgb(APP_TILE[1])) if shade else (_rgb(TILE),) * 2
-    glyph = (_rgb(APP_GLYPH[0]), _rgb(APP_GLYPH[1])) if shade else (_rgb(GLYPH),) * 2
+    pair = (lambda c: (_rgb(c[0]), _rgb(c[1]))) if shade else (lambda c: (_rgb(c),) * 2)
+    tile = pair(APP_TILE if shade else TILE)
+    glyph = pair(APP_GLYPH if shade else GLYPH)
+    left = pair(APP_LEFT if shade else LEFT)
     n, scale = (4 if size <= 128 else 2), 32 / size   # 2x2 is plenty once pixels are this small
     rows = bytearray()
     for py in range(size):
@@ -88,7 +103,15 @@ def png(size: int, style: str = "tab") -> bytes:
                     if not _in_tile(x, y, inset, 32 - inset, radius):
                         continue
                     gx, gy = (x - inset) / k, (y - inset) / k          # back on the 32 grid
-                    col = _mix(*(glyph if _in_m(gx, gy) else tile), gy / 32)
+                    t = gy / 32
+                    col = _mix(*tile, t)
+                    kind = _bar_at(gx, gy)
+                    if kind == "in":
+                        col = _mix(*glyph, t)
+                    elif kind == "out":
+                        col = _mix(col, _mix(*glyph, t), OUT_OPACITY)
+                    elif kind == "left":
+                        col = _mix(*left, t)
                     r += col[0]; g += col[1]; b += col[2]; a += 1
             if a:
                 rows += bytes((round(r / a), round(g / a), round(b / a), round(255 * a / (n * n))))

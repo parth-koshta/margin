@@ -71,23 +71,24 @@ def info_plist(url: str, key_file: Path, bundle_id: str, fix: str = "margin app 
     }
 
 
-MENU_ICON = "MenuBarIcon"          # Resources/MenuBarIcon.png and @2x: the menu bar's m
+MENU_ICON = "MenuBarIcon"          # Resources/MenuBarIcon.png and @2x: the menu bar's mark
 MENU_PT = 18                       # points; macOS menu bar icons are about this size
-MENU_FRAME = (6.0, 6.1, 20.0)      # x, y and side of the square cut from icon.py's 32 grid around the m
+MENU_FRAME = (6.0, 6.0, 20.0)      # x, y and side of the square cut from icon.py's 32 grid around the bars
 
 
 def menu_bar_png(px: int) -> bytes:
-    """Margin's m alone, black on clear, for the menu bar. The app marks it as a template image, so macOS draws it
+    """Margin's bars alone, black on clear, for the menu bar (money out a lighter tone, as on the icon). The app marks it as a template image, so macOS draws it
     in the menu bar's own colour (light, dark, or tinted). The shape is icon.py's, so the two always match; the
     figures are never in the menu bar, only behind a click."""
     from . import icon
+    TONE = {"in": 1, "out": icon.OUT_OPACITY, "left": 1}
     x0, y0, side = MENU_FRAME
     n, scale = 4, side / px
     rows = bytearray()
     for py in range(px):
         rows.append(0)
         for qx in range(px):
-            hits = sum(icon._in_m(x0 + (qx + (sx + .5) / n) * scale, y0 + (py + (sy + .5) / n) * scale)
+            hits = sum(TONE.get(icon._bar_at(x0 + (qx + (sx + .5) / n) * scale, y0 + (py + (sy + .5) / n) * scale), 0)
                        for sy in range(n) for sx in range(n))
             rows += bytes((0, round(255 * hits / (n * n))))       # grey 0 (black), alpha = coverage
 

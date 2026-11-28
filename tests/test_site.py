@@ -140,7 +140,10 @@ class Website(unittest.TestCase):
 
     def test_landing_page(self):
         html = (DOCS / "index.html").read_text(encoding="utf-8")
-        self.assertIn(icon.PATH, html)                                   # Margin's own mark
+        for d in icon.PATHS.values():                                    # Margin's own mark
+            self.assertIn(f'd="{d}"', html)
+        self.assertIn('<meta property="og:image" content="media/og.png">', html)  # made absolute only when published
+        self.assertTrue((DOCS / "media" / "og.png").exists())
         self.assertIn('href="demo/"', html)
         self.assertIn('href="demo/india.html"', html)
         # The GitHub account is read from the site's address (<owner>.github.io), never written in the file.
