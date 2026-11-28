@@ -232,9 +232,9 @@ h2{font:700 clamp(28px,4vw,38px)/1.12 var(--display);letter-spacing:-.035em;marg
 .flow .outs li{background:transparent;border-style:dashed;box-shadow:none}
 .flow .outs li .d{background:transparent;border:1.5px solid var(--muted)}
 .pipe{position:relative;height:6px;border-radius:3px;overflow:hidden;background:color-mix(in srgb,var(--mint) 18%,transparent)}
-.pipe.out{background:none;border-top:1.5px dashed color-mix(in srgb,var(--muted) 60%,transparent);height:0;overflow:visible}
-.pipe i{position:absolute;top:0;left:0;width:200%;height:100%;background:radial-gradient(circle 3px at 6px 3px,var(--mint) 95%,transparent) 0 0/20px 6px repeat-x}
-.pipe.out i{top:-4px;height:6px;opacity:.5;background:radial-gradient(circle 2.5px at 4px 3px,var(--muted) 95%,transparent) 0 0/40px 6px repeat-x}
+.pipe.out{border-radius:0;background:linear-gradient(90deg,color-mix(in srgb,var(--muted) 60%,transparent) 50%,transparent 0) 0 50%/8px 1.5px repeat-x}
+.pipe i{position:absolute;inset:0;background:radial-gradient(circle 3px at 6px 3px,var(--mint) 95%,transparent) 0 0/20px 6px repeat-x}
+.pipe.out i{opacity:.55;background:radial-gradient(circle 2.5px at 4px 3px,var(--muted) 95%,transparent) 0 0/40px 6px repeat-x}
 .mac{text-align:center;padding:22px 18px;border-radius:20px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--pop);position:relative}
 .mac::before{content:"";position:absolute;inset:-14px;border-radius:28px;border:1.5px solid var(--mint);opacity:0;pointer-events:none}
 .mac svg{width:56px;height:56px;display:block;margin:0 auto 10px}
@@ -297,9 +297,9 @@ footer p{margin:0}
   .side{position:relative;right:auto;top:auto;width:auto;max-width:440px;margin:-36px auto 0;padding:0 12px}
   .flow{grid-template-columns:1fr;gap:0;max-width:440px;margin-left:auto;margin-right:auto}
   .pipe{width:6px;height:40px;margin:10px auto}
-  .pipe i{width:100%;height:200%;background:radial-gradient(circle 3px at 3px 6px,var(--mint) 95%,transparent) 0 0/6px 20px repeat-y}
-  .pipe.out{width:0;height:40px;border-top:0;border-left:1.5px dashed color-mix(in srgb,var(--muted) 60%,transparent)}
-  .pipe.out i{top:0;left:-4px;width:6px;height:200%;background:radial-gradient(circle 2.5px at 3px 4px,var(--muted) 95%,transparent) 0 0/6px 40px repeat-y}
+  .pipe i{background:radial-gradient(circle 3px at 3px 6px,var(--mint) 95%,transparent) 0 0/6px 20px repeat-y}
+  .pipe.out{background:linear-gradient(180deg,color-mix(in srgb,var(--muted) 60%,transparent) 50%,transparent 0) 50% 0/1.5px 8px repeat-y}
+  .pipe.out i{background:radial-gradient(circle 2.5px at 3px 4px,var(--muted) 95%,transparent) 0 0/6px 40px repeat-y}
 }
 @media (max-width:640px){
   .wrap{padding:0 16px}
@@ -329,8 +329,12 @@ main{position:relative;z-index:0;overflow-x:clip}
 @keyframes ping{from{transform:scale(1);opacity:.55}to{transform:scale(1.9);opacity:0}}
 @keyframes drift{to{transform:translate(6%,8%) scale(1.12)}}
 @keyframes slide{to{transform:translateX(-50%)}}
-@keyframes flow{to{transform:translateX(-50%)}}
-@keyframes flowy{to{transform:translateY(-50%)}}
+/* Dots move the way the data does: into your Mac from the left, and out of it to the right (down, on a phone).
+   Each moves one dot spacing per loop, so the loop has no seam. */
+@keyframes flow{to{background-position:20px 0}}
+@keyframes flowout{to{background-position:40px 0}}
+@keyframes flowy{to{background-position:0 20px}}
+@keyframes flowyout{to{background-position:0 40px}}
 @keyframes glow{0%,100%{opacity:0;transform:scale(.97)}50%{opacity:.5;transform:none}}
 @keyframes ckpop{0%{transform:scale(.6)}60%{transform:scale(1.15)}}
 @keyframes bump{40%{transform:scale(1.14)}}
@@ -439,10 +443,10 @@ main{position:relative;z-index:0;overflow-x:clip}
 
 /* What comes in, what goes out: moving dots, on screen only */
 .js .flow .pipe i{animation:flow 2.4s linear infinite;animation-play-state:paused}
-.js .flow .pipe.out i{animation-duration:5s}
+.js .flow .pipe.out i{animation-name:flowout;animation-duration:5s}
 .js .flow.in .pipe i{animation-play-state:running}
 .js .flow.in .mac::before{animation:glow 3s ease-in-out infinite}
-@media (max-width:860px){.js .flow .pipe i{animation-name:flowy}}
+@media (max-width:860px){.js .flow .pipe i{animation-name:flowy}.js .flow .pipe.out i{animation-name:flowyout}}
 
 .band .wm .b-left{transform-box:fill-box;transform-origin:0 50%;animation:breathe 5s ease-in-out infinite}
 
