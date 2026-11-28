@@ -1,6 +1,7 @@
 import tests  # noqa: F401  (a temporary data folder, never the real one)
 import argparse
 import io
+import os
 import plistlib
 import shutil
 import tempfile
@@ -112,6 +113,19 @@ class Build(unittest.TestCase):
         self.assertFalse((self.tmp / ".Margin.app.new").exists())
         self.assertIn("codesign", [c[0] for c in self.calls])
         self.assertFalse(macapp.stale(app))
+
+    def test_a_new_icon_means_a_rebuild(self):
+        """The app is built again when its icon's code is newer, not only its Swift: else a new icon never shows."""
+        self.assertIn(Path(macapp.__file__).with_name("icon.py"), macapp.SOURCES)
+        app = self.tmp / "Margin.app"
+        self.build(app)
+        swift, icon_py = self.tmp / "macapp.swift", self.tmp / "icon.py"
+        swift.write_text("x"); icon_py.write_text("x")
+        os.utime(swift, (1000, 1000)); os.utime(icon_py, (1000, 1000)); os.utime(macapp.executable(app), (2000, 2000))
+        with mock.patch.object(macapp, "SOURCES", (swift, icon_py)):
+            self.assertFalse(macapp.stale(app))
+            os.utime(icon_py, (3000, 3000))                          # a release with a new icon
+            self.assertTrue(macapp.stale(app))
 
     def test_a_failed_compile_leaves_the_old_app_alone(self):
         app = self.tmp / "Margin.app"

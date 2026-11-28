@@ -139,10 +139,15 @@ def build(app: Path, url: str, key_file: Path, bundle_id: str = BUNDLE_ID, fix: 
     return app
 
 
+# What an app is made from: its Swift, and the code that draws its icons (the app's and the menu bar's). An update
+# that changes any of them rebuilds the app, so a new icon reaches Margin's app and the demo's.
+SOURCES = (SOURCE, Path(__file__), Path(__file__).with_name("icon.py"))
+
+
 def stale(app: Path) -> bool:
-    """Missing, or older than macapp.swift (then it's built again)."""
+    """Missing, or older than what it's made from (then it's built again)."""
     exe = Path(app) / "Contents" / "MacOS" / EXECUTABLE
-    return not exe.exists() or exe.stat().st_mtime < SOURCE.stat().st_mtime
+    return not exe.exists() or exe.stat().st_mtime < max(p.stat().st_mtime for p in SOURCES)
 
 
 def executable(app: Path) -> Path:
