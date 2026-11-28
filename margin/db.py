@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     category      TEXT,
     category_locked INTEGER DEFAULT 0,
     duplicate_of  INTEGER,                   -- same txn seen via another source
-    raw           TEXT
+    raw           TEXT,
+    payee_was     TEXT                       -- the alert's own payee, once you named it ('' if it had none)
 );
 CREATE INDEX IF NOT EXISTS tx_ts ON transactions(ts);
 
@@ -70,6 +71,11 @@ CREATE TABLE IF NOT EXISTS flag_state (          -- flags you marked "looks fine
     fkey TEXT PRIMARY KEY, state TEXT NOT NULL, at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS payee_names (         -- names you gave payees (payees.py)
+    key TEXT PRIMARY KEY,                        -- the payee as alerts name it, lowercased
+    name TEXT NOT NULL
+);
+
 -- Investments (invest.py). kind: in_stock | mf | us_stock | nps
 CREATE TABLE IF NOT EXISTS inv_statements (      -- monthly statements read: CDSL CAS, NPS
     id TEXT PRIMARY KEY, kind TEXT NOT NULL, as_of TEXT, read_at TEXT, ok INTEGER, note TEXT
@@ -109,6 +115,9 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(paths.DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    if "payee_was" not in {r[1] for r in conn.execute("PRAGMA table_info(transactions)")}:   # made before it existed
+        conn.execute("ALTER TABLE transactions ADD COLUMN payee_was TEXT")
+        conn.commit()
     os.chmod(paths.DB_PATH, 0o600)
     return conn
 

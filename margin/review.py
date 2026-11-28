@@ -382,6 +382,11 @@ def listing(conn: sqlite3.Connection) -> list[dict]:
         for f in flags:
             f["settled"] = _settled(conn, f["key"])
             f["fine"] = f["settled"] or looked_at(f["key"])
+            ids = f.get("txn_ids") or []      # a name you gave the payee since (payees.py) shows here too
+            now = ids and conn.execute("SELECT COALESCE(NULLIF(counterparty,''), vpa, '') AS p FROM transactions "
+                                       "WHERE id=?", (ids[0],)).fetchone()
+            if now and now["p"]:
+                f["payee"] = now["p"]
         out.append({"id": r["id"], "kind": r["kind"], "start": r["start"], "end": r["end"],
                     "label": label(r["kind"], date.fromisoformat(r["start"]), date.fromisoformat(r["end"])),
                     "created": r["created"], "headline": r["headline"], "summary": json.loads(r["summary"] or "[]"),

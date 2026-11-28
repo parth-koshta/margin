@@ -161,7 +161,7 @@ answer at all (offline, signed out, out of credit), nothing is decided and it's 
 
 Every AI gets exactly the same thing, built by Margin for each request:
 - **Sorting**: sender names, bank message text with every number of 9 or more digits cut to its last 4, payee
-  names, amounts, dates, your category list, your own rules, your names as banks print them and your `about_me`
+  names (including names you gave payees), amounts, dates, your category list, your own rules, your names as banks print them and your `about_me`
   notes.
 - **Reviews**: each payment's date, time, amount, payee, category and card or account label (never the message or
   a full account number), the period's totals and the automatic checks' flags.
@@ -250,6 +250,11 @@ and use it to improve its models, so check your plan's data settings first. Turn
 
 - **Sort out** lists payees without a category (pick one and it becomes a rule), senders that aren't a known
   bank, and everything the AI sorted, each with Undo.
+- **Naming a payee**: some alerts don't say who was paid. A UPI payment made with a credit card shows only the
+  masked end of a UPI ID, because the bank hides the rest; your UPI app shows a name because it looks the ID up
+  online, which Margin never does. Type a name in **Name** on its Sort out card, or click the payee's name in
+  Transactions. Every payment to it, past and future, shows the name, with the bank's wording underneath. Give
+  two IDs the same name and they become one payee. Clear the name to take it back.
 - **How counting works**: only alerts from banks and card issuers count (merchant receipts would double-count).
   An alert that arrives by email and by text counts once. **Transfer** (card bills, moves between your own
   accounts) and **Investments** aren't income or spending. Add your name as banks print it to `self_names` so

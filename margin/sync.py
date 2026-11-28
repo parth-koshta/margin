@@ -8,7 +8,7 @@ import subprocess
 import time
 from datetime import datetime, timedelta
 
-from . import categorize, db, epf, fx, gmail, money, networth, parse, paths, release, review, sms, smsbackup
+from . import categorize, db, epf, fx, gmail, money, networth, parse, paths, payees, release, review, sms, smsbackup
 
 DEFAULT_SETTINGS = {
     "backfill_days": 365,
@@ -230,10 +230,12 @@ def _category(direction: str, party: str, text: str, amount: float, settings: di
 
 def recategorize(conn: sqlite3.Connection, settings: dict) -> int:
     categorize.reload_rules()
+    payees.apply(conn)          # names you gave payees first: rules may be made on them
     n = 0
-    for r in conn.execute(
-            "SELECT id, direction, amount, counterparty, vpa, raw FROM transactions WHERE category_locked=0").fetchall():
-        party = " ".join(x for x in (r["counterparty"], r["vpa"]) if x)
+    for r in conn.execute("SELECT id, direction, amount, counterparty, vpa, payee_was, raw FROM transactions "
+                          "WHERE category_locked=0").fetchall():
+        # a named payee still matches rules made on the alert's own wording
+        party = " ".join(x for x in (r["counterparty"], r["vpa"], r["payee_was"]) if x)
         cat = _category(r["direction"], party, r["raw"] or "", r["amount"], settings)
         conn.execute("UPDATE transactions SET category=? WHERE id=?", (cat, r["id"]))
         n += 1
@@ -248,7 +250,7 @@ def reparse_parties(conn: sqlite3.Connection, settings: dict) -> int:
     home = money.home(settings)
     cur = lambda r: parse.currency_for(r["bank"], home)   # noqa: E731
     rows = [r for r in conn.execute("SELECT id, raw, bank, amount, direction, counterparty, vpa, last4 FROM transactions "
-                                    "WHERE source != 'file'")
+                                    "WHERE source != 'file' AND payee_was IS NULL")   # not ones you named
             if not (r["counterparty"] or r["vpa"]) or (r["counterparty"] and parse.is_junk_party(r["counterparty"]))
             or (r["last4"] and r["counterparty"] == f"A/c ••{r['last4']}")]   # your own account isn't the payee
     # Alerts the parser now recognises as not-a-payment (e.g. "to be debited by" notices), and ones from
@@ -288,7 +290,7 @@ def reparse_parties(conn: sqlite3.Connection, settings: dict) -> int:
             continue   # already the kept copy of something
         _mark_duplicate(conn, r["id"], r["source"], r["ts"], r["amount"], r["direction"], r["last4"])
     for r in conn.execute("SELECT id, counterparty FROM transactions WHERE COALESCE(counterparty,'')!='' "
-                          "AND source != 'file'").fetchall():
+                          "AND source != 'file' AND payee_was IS NULL").fetchall():
         cleaned = parse._clean_party(r["counterparty"])
         if cleaned != r["counterparty"]:
             conn.execute("UPDATE transactions SET counterparty=? WHERE id=?", (cleaned, r["id"]))
@@ -470,6 +472,9 @@ def run(quiet_notify: bool = False) -> int:
 
     if db.get_state(conn, "parser_version") != str(parse.PARSER_VERSION):
         reparse_parties(conn, settings)
+    if payees.apply(conn):      # new payments to payees you named get the name, and the rules you made on it
+        recategorize(conn, settings)
+    conn.commit()
     try:   # AI sorting must never break the sync
         from . import ai
         sorted_ = ai.run(conn, settings, progress)

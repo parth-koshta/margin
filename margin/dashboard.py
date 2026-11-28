@@ -18,10 +18,12 @@ def _settings() -> dict:
 
 def data(conn: sqlite3.Connection, nw: dict, status: dict) -> dict:
     txns = []
-    for r in conn.execute("""SELECT id, ts, amount, direction, category, counterparty, vpa, account, source, raw
-                             FROM transactions WHERE duplicate_of IS NULL ORDER BY ts DESC"""):
+    for r in conn.execute("""SELECT id, ts, amount, direction, category, counterparty, vpa, payee_was, account, source,
+                                    raw FROM transactions WHERE duplicate_of IS NULL ORDER BY ts DESC"""):
         t = {"id": r["id"], "d": r["ts"][:10], "a": round(r["amount"], 2), "dir": r["direction"], "c": r["category"],
              "p": r["counterparty"] or r["vpa"] or "", "acct": r["account"] or "", "src": r["source"]}
+        if r["payee_was"] is not None:           # a payee you named (payees.py): what its alert called it
+            t["w"] = r["payee_was"] or r["vpa"] or ""
         orig = money.original(r["raw"])          # paid in another currency: show what it was
         if orig:
             t["fx"] = list(orig)
@@ -238,6 +240,11 @@ details[open]>summary{margin-bottom:12px}
 .who{min-width:0}
 .who b{display:block;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .who span{font-size:12.5px;color:var(--muted)}
+/* a payee's name in Transactions: click to give it your own (payees.py) */
+.nmbtn{display:block;max-width:100%;border:0;background:none;color:inherit;font:inherit;font-weight:550;padding:0;cursor:text;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nmbtn:hover{text-decoration:underline dotted var(--muted);text-underline-offset:3px}
+.nmedit{display:block;height:26px;width:min(260px,100%);border:1px solid var(--accent);border-radius:7px;background:var(--surface);color:var(--text);padding:0 7px;font:inherit;font-weight:550;margin:-2px 0 1px}
+.nmedit:focus{outline:none}
 
 /* Allocation */
 .stackbar{display:flex;gap:2px;height:10px;margin:2px 0 12px}
@@ -892,7 +899,8 @@ function txHtml(t){
   const unset=/^Other (spending|income)$/.test(t.c);
   const cat=LIVE?`<button class="cat pill-btn${unset?' unset':''}" data-id="${t.id}" aria-haspopup="listbox" aria-expanded="false" title="Change category">${esc(unset?'Choose category':t.c)}${CHEV}</button>`
                 :`<span class="cat">${esc(t.c)}</span>`;
-  return `<div class="tx"><span class="av">${esc(initials(t.p||'?'))}</span><span class="who"><b>${esc(disp(t.p)||'No payee name')}</b><span>${esc(t.acct)}${orig(t)}</span></span>${cat}<span class="amt${t.dir==='in'?' in':''}">${t.dir==='in'?'+':'−'}${money(t.a)}</span></div>`; }
+  const who=LIVE&&t.p?`<button class="nmbtn" data-id="${t.id}" title="Give this payee a name">${esc(disp(t.p))}</button>`:`<b>${esc(disp(t.p)||'No payee name')}</b>`;
+  return `<div class="tx"><span class="av">${esc(initials(t.p||'?'))}</span><span class="who">${who}<span>${esc(t.acct)}${t.w?' · '+esc(disp(t.w)):''}${orig(t)}</span></span>${cat}<span class="amt${t.dir==='in'?' in':''}">${t.dir==='in'?'+':'−'}${money(t.a)}</span></div>`; }
 
 function review(){
   $('review').innerHTML=D.review.length?D.review.map(r=>`<tr><td class="date">${esc(r.ts.slice(0,10))}</td><td>${esc(r.sender)}</td><td>${esc(r.reason)}</td><td>${esc(r.snippet)}</td></tr>`).join(''):`<tr><td colspan="4" class="empty">Nothing to review.</td></tr>`;
@@ -1255,6 +1263,24 @@ if(LIVE){
           .catch(e=>toast(e.message)); }
       else act('/api/txn',{id:t.id,category:cat},`This payment → ${cat} (it has no payee name, so just this one)`); }); });
 
+  // Names you give payees (payees.py): every payment to that payee, past and future, shows it. key: the payee as
+  // the page groups it (its name, lowercased); '' takes the name back. Undo puts the names back as they were.
+  const namePayee=(key,name,shown,el)=>{ name=name.trim(); if(el) el.disabled=true;
+    return api('/api/payee/name',{key,name}).then(st=>{ const before=st.before||{}; apply(st);
+      if(Object.keys(before).length) toast(name?`Named “${name}”: every payment to ${shown}`:`${shown} has its own name back`,
+        ()=>api('/api/payee/names',{names:before}).then(apply)); })
+      .catch(e=>{ if(el) el.disabled=false; toast(e.message); }); };
+  // Transactions: click a payee's name to name it (Enter saves, Esc leaves it)
+  $('tx').addEventListener('click',e=>{ const b=e.target.closest('.nmbtn'); if(!b||!S) return;
+    const t=D.txns.find(x=>x.id==b.dataset.id); if(!t) return;
+    const was=t.w?t.p:'', inp=document.createElement('input');
+    inp.className='nmedit'; inp.value=was; inp.placeholder=disp(t.p); inp.maxLength=48; inp.setAttribute('aria-label','Name this payee');
+    b.replaceWith(inp); inp.focus(); inp.select();
+    let done=false; const finish=save=>{ if(done) return; done=true; const v=inp.value.trim();
+      if(save&&v!==was) namePayee(t.p.toLowerCase(),v,disp(t.w||t.p)); else drawTx(); };
+    inp.onkeydown=ev=>{ if(ev.key==='Enter'||ev.key==='Escape'){ ev.preventDefault(); finish(ev.key==='Enter'); } };
+    inp.onblur=()=>finish(true); });
+
   // ---------- Sort out ----------
   const SPARK_I='<svg class="i" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/></svg>';
   // the AI the person chose (llm.py): "Claude", "Codex", "Grok", "LM Studio"…; "AI" in the demo. AIC starts a sentence.
@@ -1290,20 +1316,23 @@ if(LIVE){
       return `<div class="sorow pay" data-i="${i}"><span class="av">${esc(initials(p.name))}</span>
         <div class="main"><div class="top2"><button class="namebtn" aria-expanded="${open}" title="Show its payments"><span>${esc(disp(p.name))}</span><span class="car">▶</span></button>
             <span class="total${p.dir==='in'?' in-amt':''}">${p.dir==='in'?'+':'−'}${money(p.total)}</span></div>
-          <div class="meta">${p.n} payment${p.n==1?'':'s'} · last on ${dyear(p.last)}${p.dir==='in'?' · money in':''}</div>
+          <div class="meta">${p.n} payment${p.n==1?'':'s'} · last on ${dyear(p.last)}${p.dir==='in'?' · money in':''}${p.was?` · <span title="What the bank’s alert calls it">${esc(p.was.slice(0,2).map(disp).join(', '))}${p.was.length>2?` +${p.was.length-2}`:''}</span>`:''}</div>
           <div class="sugs">${sg.map((s,j)=>`<button class="sug${j===0&&s.src!=='often'?' best':''}" data-cat="${esc(s.cat)}" title="${esc(sugWhy(s))}">${s.src==='claude'?SPARK_I:''}${esc(s.cat)}</button>`).join('')}<button class="sug more" aria-haspopup="listbox" aria-expanded="false">${sg.length?'Other…':'Choose category'}</button></div>
-          <div class="adv">${best&&best.src!=='often'?`<span>${esc(sugWhy(best))}</span>`:''}<label class="matchf">Matches <input value="${esc(p.name)}" aria-label="Match on" title="Shorten it to cover variations, e.g. swiggy"></label></div>
+          <div class="adv">${best&&best.src!=='often'?`<span>${esc(sugWhy(best))}</span>`:''}<label class="matchf">Name <input class="nm" value="${p.was?esc(p.name):''}" placeholder="Who is this?" maxlength="48" aria-label="Name this payee" title="Shown on every payment to this payee, past and future. Stays on this Mac."></label><label class="matchf">Matches <input class="m" value="${esc(p.name)}" aria-label="Match on" title="Shorten it to cover variations, e.g. swiggy"></label></div>
           ${open?`<div class="pays">${pays.map(t=>`<span>${dyear(t.d)} · ${money(t.a)}${orig(t)} · ${esc(t.acct)}</span>`).join('')||'No payments found.'}</div>`:''}</div></div>`; });
     $('so-payees').innerHTML=rows.length?rows.join(''):`<p class="empty">${S.payees.length?'No payees match the filter.':'Every payee has a category.'}</p>`;
     $('so-payees').querySelectorAll('.namebtn').forEach(b=>b.onclick=()=>{ const p=S.payees[+b.closest('.sorow').dataset.i], k=p.key+'|'+p.dir;
       expanded.has(k)?expanded.delete(k):expanded.add(k); sortout(); });
     // a tap (or a pick from the full list) becomes a rule: past and future payments to that payee follow
-    const sortPayee=(row,cat)=>{ const p=S.payees[+row.dataset.i], match=row.querySelector('input').value.trim();
+    const sortPayee=(row,cat)=>{ const p=S.payees[+row.dataset.i], match=row.querySelector('input.m').value.trim();
       if(!match||!p.name.toLowerCase().includes(match.toLowerCase())){ toast('“Matches” must be part of the payee name'); return; }
       const btns=row.querySelectorAll('.sug'); btns.forEach(b=>b.disabled=true);
       act('/api/rule',{match,category:cat,dir:p.dir},`${disp(match)} → ${cat}`,()=>api('/api/rule/delete',{i:0}).then(apply))
         .then(ok=>{ if(!ok) btns.forEach(b=>b.disabled=false); }); };
     $('so-payees').querySelectorAll('.sug[data-cat]').forEach(b=>b.onclick=()=>sortPayee(b.closest('.sorow'),b.dataset.cat));
+    $('so-payees').querySelectorAll('input.nm').forEach(inp=>{ const p=S.payees[+inp.closest('.sorow').dataset.i];
+      inp.onkeydown=e=>{ if(e.key==='Enter'){ e.preventDefault(); inp.blur(); } };
+      inp.onchange=()=>namePayee(p.key,inp.value,p.was?p.was.map(disp).join(', '):disp(p.name),inp); });
     $('so-payees').querySelectorAll('.sug.more').forEach(btn=>btn.onclick=()=>{ const row=btn.closest('.sorow');
       openMenu(btn, S.payees[+row.dataset.i].dir, null, cat=>sortPayee(row,cat)); });
 

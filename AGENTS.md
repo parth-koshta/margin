@@ -368,6 +368,7 @@ margin. The same shapes make the page's icon, the Mac app's icon, its menu bar i
 | `invest.py`, `cas.py`, `nps.py`, `usstocks.py`, `epf.py`, `fd.py`, `ppf.py`, `prices.py` | Investments |
 | `imports.py` | Bank, card and broker files downloaded into the statements folder (CSV, QFX/OFX) |
 | `networth.py`, `tidy.py` | Net worth; Sort out logic |
+| `payees.py` | Names the person gives payees: put on every payment to that payee (`counterparty`), the alert's own wording kept in `payee_was` |
 | `server.py`, `dashboard.py`, `icon.py`, `lock.py`, `touchid.swift` | The local page, its server and the Touch ID lock |
 | `macapp.py`, `macapp.swift`, `glance.py` | The Margin app: the page in its own window and the menu bar glance (AppKit + WebKit, built with swiftc); the glance's figures |
 | `pdf.py`, `pdftext.swift`, `keychain.py` | Locked PDFs via PDFKit; Keychain secrets |

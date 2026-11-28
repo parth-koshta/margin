@@ -82,8 +82,20 @@ def _payee_groups(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def payee_list(conn: sqlite3.Connection) -> list[dict]:
-    return [{"key": r["k"], "dir": r["direction"], "name": r["name"], "n": r["n"], "total": round(r["total"], 2),
-             "last": r["last"][:10]} for r in _payee_groups(conn)]
+    was: dict[tuple, set] = {}      # payees you named (payees.py): what their alerts call them
+    for r in conn.execute("""SELECT LOWER(COALESCE(NULLIF(counterparty,''), vpa)) AS k, direction,
+                                    COALESCE(NULLIF(payee_was,''), vpa) AS w FROM transactions
+                             WHERE payee_was IS NOT NULL AND duplicate_of IS NULL"""):
+        if r["w"]:
+            was.setdefault((r["k"], r["direction"]), set()).add(r["w"])
+    out = []
+    for r in _payee_groups(conn):
+        p = {"key": r["k"], "dir": r["direction"], "name": r["name"], "n": r["n"], "total": round(r["total"], 2),
+             "last": r["last"][:10]}
+        if (r["k"], r["direction"]) in was:
+            p["was"] = sorted(was[(r["k"], r["direction"])])
+        out.append(p)
+    return out
 
 
 def uncategorized_counts(conn: sqlite3.Connection) -> dict:

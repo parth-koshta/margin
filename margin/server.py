@@ -26,7 +26,8 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import ai, categorize, dashboard, db, icon, llm, lock, networth, paths, release, review, suggest, sync, tidy
+from . import (ai, categorize, dashboard, db, icon, llm, lock, networth, paths, payees, release, review, suggest, sync,
+               tidy)
 
 IDLE_MINUTES = 20
 HOSTNAME = "margin.localhost"                  # *.localhost always means this Mac: Chrome and macOS never ask the
@@ -392,6 +393,23 @@ class Handler(BaseHTTPRequestHandler):
                 st = _state(conn)
                 st["changed"] = changed
                 return self._json(st)
+            if path == "/api/payee/name":     # name a payee (payees.py); '' takes the name back
+                key, name = b.get("key"), b.get("name", "")
+                if not isinstance(key, str) or not key.strip() or not isinstance(name, str) or len(key) > 300:
+                    return self._json({"error": "bad request"}, 400)
+                before = payees.set_name(conn, key, name)
+                _after_change(conn)
+                st = _state(conn)
+                st["before"] = before          # for Undo: /api/payee/names puts these back
+                return self._json(st)
+            if path == "/api/payee/names":
+                names = b.get("names")
+                if not isinstance(names, dict) or len(names) > 500 or not all(
+                        isinstance(k, str) and isinstance(v, str) for k, v in names.items()):
+                    return self._json({"error": "bad request"}, 400)
+                payees.restore(conn, names)
+                _after_change(conn)
+                return self._json(_state(conn))
             if path == "/api/txns/restore":
                 ch = [(str(c), int(i)) for i, c in b.get("changes", []) if str(c) in set(tidy.SPEND + tidy.INCOME + tidy.BOTH)]
                 conn.executemany("UPDATE transactions SET category=? WHERE id=?", ch)
